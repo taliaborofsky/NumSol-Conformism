@@ -1,0 +1,341 @@
+---
+title: "Sensitivity Analysis"
+author: "Talia Borofsky"
+date: "5/31/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stargazer)
+library(car)
+library(dplyr)
+library(aod)
+library(ggplot2)
+library(latex2exp)
+library(olsrr)
+library(lmtest)
+
+caption_at_bottom <- function(x,fn ) {
+  # x is output from stargazer, fn is filename
+  cap <- grep("\\\\caption", x)
+  lab <- grep("\\\\label", x)
+  last <- grep("\\\\end\\{table", x)
+  cat(
+    paste(
+      c(x[-last], x[cap], x[lab], x[last])[-c(cap, lab)]
+    , collapse = "\n")
+  , "\n", file = fn, append = TRUE)
+}
+p_lratiotest <- function(mylogit){
+  result <- with(mylogit, pchisq(null.deviance - deviance, df.null - df.residual, lower.tail = FALSE))
+  return(result)
+}
+```
+
+```{r dframes}
+
+# load the Unique Equilibria
+uniqueEquilibria <- read.csv('UniqueEquilibriaDF.csv', as.is=TRUE)
+uniqueEquilibria$D <-round(uniqueEquilibria$D,digits = 10)
+eqData <- uniqueEquilibria %>% rename(s = d,
+                            C_s = C_d
+                            )
+
+eqData %>% filter(URstable == -1)
+# only use equilibria that are internally stable
+eqData <- eqData %>% filter(URstable==1)
+# add column for learning success and solumns for whether more soc. learning, more conformity, or more anticonformity invade
+
+eqData$learningSuccess = eqData$u1eq + eqData$u2eq # portion of foragers that learn how to find food
+eqData$xInvades <- eqData$C_s>0
+eqData$y_pos_Invades <- eqData$C_D>0 # more conformity invades
+eqData$y_neg_Invades <- eqData$C_D < 0 # less conformity invades, or if D <=0, anticonformity invades
+# D > 0
+#eqData$totalFood = eqData$r1eq + eqData$r2eq # total food left in the environment
+
+# Make separate data frames for whether D \geq 0 or D \leq 0 and for whether or not u1 = u2
+eqDataPos = eqData %>% filter(D>=0)
+eqDataPos_UnEqual <-  eqDataPos %>% filter(difference > 0)
+eqDataPos_Equal = eqDataPos %>% filter(difference==0)
+# D < 0
+eqDataNeg = eqData %>% filter(D<=0)
+eqDataNeg_UnEqual = eqDataNeg %>% filter(difference>0)
+eqDataNeg_Equal = eqDataNeg %>% filter(difference==0)
+
+# number of rows where u1 \neq u2 and D < 0: none
+print(nrow(eqData[eqData$D < 0 & eqData$difference > 0,]))
+
+
+uniqueEquilibria %>% filter(URstable==0)
+```
+
+```{r anticonformity W}
+m <- lm(data = eqDataNeg, Weq ~ D)
+cor.test(eqDataNeg$D, eqDataNeg$Weq, method = "spearman", alternative = "less")
+
+cor.test(eqDataNeg$D, eqDataNeg$learningSuccess, method = "spearman", alternative = "greater")
+
+```
+
+```{r s D when evolve}
+model.xinvades <- glm(data = eqData, xInvades ~ s + D, family = binomial(link = "logit"))
+summary(model.xinvades)
+dat <- eqData %>% filter(xInvades==TRUE)
+min(dat$K)
+lrtest(model.xinvades)
+
+model.yinvades <- glm(data = eqData, y_pos_Invades ~  s + D, family = binomial(link = "logit"))
+summary(model.yinvades)
+dat <- eqData %>% filter(y_pos_Invades==TRUE)
+min(dat$D)
+lrtest(model.yinvades)
+
+star.cutoffs <- c(.05, .01,.001)
+stargazer(model.xinvades, model.yinvades,
+          type = "text",
+          dep.var.caption = "", 
+          single.row = TRUE,
+          star.cutoffs = star.cutoffs)
+
+```
+```{r depletion and behavior pref}
+m <- lm(data = eqData, difference ~ beta)
+summary(m)
+cor.test(eqData$beta, eqData$difference, method = "spearman", alternative = "less")
+```
+
+
+
+```{r H1}
+# how do behavior preference and effect of predation together affect mean population fitness and learning success?
+# do mlr, ind. vars = beta, difference. dependent variables are (1) W and then (2) u1 + u2.
+# do for u1 = u2, thus only looking at how beta affects learning success. Then, to compare, do for u1 \neq u2. For this comparison to be 'fair', have D \geq 0.
+
+model.LS.H1.eq <- lm(data = eqDataPos_Equal, learningSuccess ~ beta)
+summary(model.LS.H1.eq)
+nrow(eqDataPos_Equal)
+##  The alternative hypothesis of interest is that the LS is negatively associated with food depletability.
+cor.test(eqDataPos_Equal$beta, eqDataPos_Equal$learningSuccess,method = "spearman", alternative = "greater")
+summary(lm(data = eqDataNeg_Equal, learningSuccess ~ beta))
+cor.test(eqDataNeg_Equal$beta, eqDataNeg_Equal$learningSuccess, method = "spearman", alternative = "less")
+
+model.W.H1.eq <- lm(data = eqDataNeg_Equal, Weq ~ beta)
+summary(model.W.H1.eq)
+cor.test(eqDataPos_Equal$beta, eqDataPos_Equal$Weq,method = "spearman", alternative = "less")
+cor.test(eqDataNeg_Equal$beta, eqDataNeg_Equal$Weq,method = "spearman", alternative = "less")
+
+model.LS.H1.UE <- lm(data = eqDataPos_UnEqual, learningSuccess ~ beta*difference)
+summary(model.LS.H1.UE)
+dat = eqDataPos_UnEqual
+cor.test(dat$beta*dat$difference, dat$learningSuccess, method = "spearman", alternative = "less")
+plot(model.LS.H1.UE) # not a good model if look at QQ plot of residuals vs predicted values
+model.W.H1.UE <- lm(data = eqDataPos_UnEqual, Weq ~ beta*difference)
+summary(model.W.H1.UE)
+
+# maybe s is caused behavior difference to be beneficial?
+model.LS.H1.UE.s <- lm(data = eqDataPos_UnEqual, learningSuccess ~ s*difference+beta*difference)
+summary(model.LS.H1.UE.s)
+# no it doesn't tell you anything
+
+# USE THESE: 
+
+library(ggplot2)
+datUse = eqDataPos %>% mutate(betadiff = beta*difference)
+plotH1.LS <- ggplot(data = datUse, mapping = aes(x = difference, y = learningSuccess, color = beta)) + geom_point(size = 3, alpha = 0.5) + theme_bw()+ labs(x = TeX("$|\\hat{u_1} - \\hat{u_2}|$"), y = TeX("$\\hat{u_1} + \\hat{u_2}$"), color = TeX("$\\beta$")) 
+plotH1.LS
+ggsave("Figures/plotH1_LS.png", plot = plotH1.LS)
+
+plot.H1.W <- ggplot(data = datUse, mapping = aes(x = difference, y = Weq, color = beta)) + geom_point(size=3, alpha = 0.5) + theme_bw() + labs(x = TeX("$|\\hat{u_1} - \\hat{u_2}|$"), y = TeX("$\\hat{W}$"), color = TeX("$\\beta$")) 
+plot.H1.W
+ggsave("Figures/plotH1_W.png", plot = plot.H1.W)
+
+
+model.W.H1 <- lm(data = eqDataPos, Weq ~ beta*difference)
+summary(model.W.H1)
+
+```
+
+
+```{r H2}
+# Hypothesis: Social learning and conformity cause more behavioral preference.
+# Multiple linear regression with the independent variables being s, D, and sD, while the
+#dependent variable is |u1 - u2|
+
+
+# use D \geq 0
+
+eqData.maxDiff <- eqDataPos %>%
+  group_by(s,K,D,mu,beta) %>%
+  summarise(max_diff = max(difference)) %>% 
+  mutate(sD = s*D)
+model.H2 <- lm(data = eqData.maxDiff, max_diff ~ s* D)
+summary(model.H2)
+plot(model.H2)
+
+ols_test_breusch_pagan(model.H2) # got a low p-value so heteroscedastic. can't use lm and logistic ?
+
+
+datUse = eqData.maxDiff
+# i need a regression line
+dat_predict <- datUse[c('s','D','sD')]
+dat_predict$max_diff <- predict(model.H2, new.data = dat_predict)
+
+plotH2 <- ggplot(data = datUse, mapping = aes(x = sD, y = max_diff)) + geom_point(size = 3, shape = 1) + theme_bw()
+plotH2 <- plotH2 + labs(x = TeX("$sD$"), y = TeX("$|\\hat{u_1} - \\hat{u_2}|$"))  
+plotH2
+ggsave("Figures/plotH2.png", plot = plotH2)
+
+
+df_use = eqData.maxDiff %>% filter(mu==-0.5)
+plot(df_use$sD, df_use$max_diff) # TO-DO// then try coloring by mu and beta
+
+# issue: each set of parameters has u1 = u2 as an equilibria, but not all have u1 \neq u2 as equilibria. What if instead I looked at max difference
+
+max(eqData.maxDiff$max_diff)
+```
+
+``` {r H3}
+# As beta increases, and u1 \neq u2, then conformity and social learning will be less likely to invade
+datUse1 = eqDataPos_UnEqual
+datUse2 = eqDataPos_Equal
+
+model.y.H3 <- glm(data = datUse1, y_pos_Invades ~ beta, family = binomial(link="logit"))
+lrtest(model.y.H3)
+summary(model.y.H3)
+stargazer(model.y.H3, type = "text", single.row = TRUE)
+
+model.x.H3 <- glm(data = datUse1, xInvades ~ beta, family = binomial(link="logit"))
+lrtest(model.x.H3)
+stargazer(model.x.H3, type = "text", single.row = TRUE)
+summary(model.x.H3)
+p_lratiotest(model.x.H3)
+
+dat = datUse1 %>% filter(mu < 0)
+model.x.H3.muneg <- glm(data = dat, xInvades ~ beta, family = binomial(link="logit"))
+lrtest(model.x.H3.muneg)
+summary(model.x.H3.muneg)
+
+
+datUse2 = eqData %>% filter(difference == 0, mu < 0)
+model.x.H3.eq <- glm(data = datUse2,xInvades ~ beta, family = binomial(link="logit"))
+summary(model.x.H3.eq)
+lrtest(model.x.H3.eq)
+
+plot(model.H3)
+```
+
+```{r H4}
+#If information in the environment is difficult to attain (mu < 0), then increased social learning will bring more learning success. Furthermore, in this situation more learning success will select for more social learning, increasing the probability that C_s > 0
+datUse1 <- eqData %>% filter(mu<0)
+m1.H4 <- lm(data = datUse1, learningSuccess ~ s)
+cor.test(datUse1$s, datUse1$learningSuccess,method = "spearman", alternative = "greater")
+summary(m1.H4)
+
+m1.H4.rev <- glm(data = datUse1, xInvades ~ learningSuccess, family = binomial(link = logit))
+summary(m1.H4.rev)
+lrtest(m1.H4.rev)
+
+datUse2 <- eqData %>% filter(mu>=0)
+m2.H4 <- lm(data = datUse2, learningSuccess ~ s)
+summary(m2.H4)
+cor.test(datUse2$s,datUse2$learningSuccess,method = "spearman", alternative = "greater")
+m2.H4.rev <- glm(data = datUse2, xInvades ~ learningSuccess, family = binomial(link = logit))
+summary(m2.H4.rev)
+p_lratiotest(m2.H4.rev)
+
+
+```
+
+
+To-do: Do D < 0 and D > 0 separately
+
+```{r ternary Unequal}
+#detach("package:plotly", unload = TRUE)
+library(ggplot2)
+library(ggtern)
+library(latex2exp)
+
+
+datUse = eqDataPos
+
+
+plotC_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = xInvades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotC_s <- plotC_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"),color = TeX("$C_s > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotC_s
+ggsave("Figures/ternaryAll_C_s.png", plot = plotC_s)
+
+plotC_D <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = y_pos_Invades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotC_D <- plotC_D + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), color = TeX("$C_D > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotC_D
+ggsave("Figures/ternaryAll_C_D.png", plot = plotC_D)
+
+
+plotD <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = D), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotD <- plotD + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotD
+ggsave("Figures/ternaryAll_bigD.png", plot = plotD)
+
+plotMU <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = mu), size = 3, alpha = 0.5, shape = 1) + theme_bw()
+plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotMU
+ggsave("Figures/ternaryAllMU.png", plot = plotMU)
+
+plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), alpha = 0.5, size = 3, shape = 1) + theme_bw() 
+plotd <- plotd + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'd') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotd
+ggsave("Figures/ternaryAll_d.png", plot = plotd)
+
+plotBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
+plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotBeta
+ggsave("Figures/ternaryAllbeta.png", plot = plotBeta)
+
+plotDBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = D*beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
+plotDBeta <- plotDBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$D*\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotDBeta
+ggsave("Figures/ternaryDbeta.png", plot = plotDBeta)
+
+plotmu_s<- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = mu*s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
+plotmu_s <- plotmu_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$s*\\mu$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotmu_s
+ggsave("Figures/ternary_mu_s.png", plot = plotmu_s)
+
+plot_s_d <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = D*s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
+plot_s_d <- plot_s_d + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$s*D$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plot_s_d
+ggsave("Figures/ternary_s_d.png", plot = plot_s_d)
+
+```
+
+
+```{r ternary Unequal}
+#detach("package:plotly", unload = TRUE)
+library(ggplot2)
+library(ggtern)
+library(latex2exp)
+
+
+datUse = eqDataNeg
+plotD <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = D), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotD <- plotD + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotD
+ggsave("Figures/ternaryAll_bigD_UE.png", plot = plotD)
+
+plotMU <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = mu), size = 3, alpha = 0.5, shape = 1) + theme_bw()
+plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotMU
+ggsave("Figures/ternaryAllMU_UE.png", plot = plotMU)
+
+plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), alpha = 0.5, size = 3, shape = 1) + theme_bw() 
+plotd <- plotd + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'd') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotd
+ggsave("Figures/ternaryAll_d_UE.png", plot = plotd)
+
+plotBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
+plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotBeta
+ggsave("Figures/ternaryAllbeta_UE.png", plot = plotBeta)
+
+
+```
