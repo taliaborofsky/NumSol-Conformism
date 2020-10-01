@@ -2,7 +2,9 @@
 title: "Sensitivity Analysis"
 author: "Talia Borofsky"
 date: "5/31/2020"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -15,6 +17,9 @@ library(ggplot2)
 library(latex2exp)
 library(olsrr)
 library(lmtest)
+library(zeallot)
+library(ROSE) # for roc curve
+library(RVAideMemoire) # library that has spearman.ci function...gets confidence intervals on spearman using bootstrap
 
 caption_at_bottom <- function(x,fn ) {
   # x is output from stargazer, fn is filename
@@ -31,28 +36,101 @@ p_lratiotest <- function(mylogit){
   result <- with(mylogit, pchisq(null.deviance - deviance, df.null - df.residual, lower.tail = FALSE))
   return(result)
 }
+classification_table <- function(mod,Y){
+  
+  Yhat <- fitted(mod)
+  thresh <- 0.5
+  YhatFac <- cut(Yhat, breaks = c(-Inf, thresh, Inf), labels = c("FALSE", "TRUE"))
+  cTab <- table(Y, YhatFac)
+  addmargins(cTab)
+}
 ```
 
-```{r dframes}
+# K > 1/2, D = 0, unequal equilibrium
+$$
+\text{sign}(C_D) = \text{sign} \left( \frac{2K-1}{K} -3 \left(u_1^2 + \left( \frac{2K-1}{K} - u1 \right)^2 \right)+2 \left(u_1^3 + \left( \frac{2K-1}{K} - u1 \right)^3 \right)\right)
+$$
+
+
+```{r}
+K<-seq(1/2,0.99,length=1000)
+u<-seq(0,1,length=1000)
+z<-outer(K,u,function(K,u) (2*K-1)/K -3*u^2 -3*((2*K-1)/K -u)^2 + 2*u^3 + 2*((2*K-1)/K -u)^3)
+require(genridge)
+filled.contour(K,u,z, levels = c(-1000,0,1000), col = c("blue","white"), xlab = "K",ylab = TeX("$u_1$"))
+
+
+grid <- expand.grid(K = seq(1/2,0.99,length.out=1000),u = seq(0,1,length.out=1000))
+f <- function(K,u) (2*K-1)/K -3*u^2 -3*((2*K-1)/K -u)^2 + 2*u^3 + 2*((2*K-1)/K -u)^3
+f2 <- function(K,u) (2*K-1)/K - u
+grid$filled <- (f(grid$K,grid$u)>=0) 
+grid$filled[(f2(grid$K,grid$u)<0)|(f2(grid$K,grid$u)>1)] = NA
+p<- ggplot(grid) + geom_tile(aes(x=K,y=u,fill=filled))  + theme_classic() + labs(x=TeX("$K$"),y = TeX("$u_1$"))+ theme(legend.position = "none") + scale_fill_brewer(palette="Set1", na.value="white")
+
+p
+ggsave("D0Unequal_C_D.png", plot = p)
+#red means C_D < 0, turquoise means C_D > 0
+```
+
+
+```{r dframes, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
 
 # load the Unique Equilibria
-uniqueEquilibria <- read.csv('UniqueEquilibriaDF.csv', as.is=TRUE)
-uniqueEquilibria$D <-round(uniqueEquilibria$D,digits = 10)
-eqData <- uniqueEquilibria %>% rename(s = d,
-                            C_s = C_d
-                            )
 
-eqData %>% filter(URstable == -1)
+uniqueEquilibria <- read.csv('UniqueEquilibriaDF.csv', as.is=TRUE)
+
+
+# helped to round D values
+uniqueEquilibria$D <-round(uniqueEquilibria$D,digits = 10)
+
+# setting up the columns that indicate whether more/less social learning evolves, more/less conformity evolves
+uniqueEquilibria$x_pos_invades <- uniqueEquilibria$C_s > 0
+uniqueEquilibria$x_neg_invades <- uniqueEquilibria$C_s < 0
+uniqueEquilibria[uniqueEquilibria=="True"]=TRUE
+uniqueEquilibria[uniqueEquilibria=="False"]=FALSE
+### deal with equilibria for which lambda* = 1
+
+# rename and do rest of changes to eqData
+eqData <- uniqueEquilibria
+
+# I need to check on calculating C_s
+fs <- function(s,mu) dnorm(s,mean=mu,sd=1)
+fms <- function(s,mu) dnorm(-s,mean=mu,sd=1)
+phifun<-function(u) u*(1-u)*(2*u-1)
+get_C_s <- function(s,mu,W,D,u1,u2,r1,r2) (1/W)*(-fs(s,mu) + (fs(s,mu)+fms(s,mu))*(r1*(u1 + D*phifun(u1)) + r2*(u2+D*phifun(u2)) ) )
+C_s = get_C_s(eqData$s, eqData$mu, eqData$W, eqData$D, eqData$u1eq, eqData$u2eq, eqData$r1eq, eqData$r2eq)
+eqData$C_s = C_s
+
+# remove the small very s, D values
+eqData <- eqData %>% filter(s != 0.01) %>% filter(D != -0.01) %>% filter(D!=0.01)
+
+# remove values where s = 0 and D > 0
+eqData <- eqData %>% filter(!(s==0&D!=0))
+
+# fix equilibria in which lambdastar = 1 but actually internally stable
+attach(eqData)
+mask =(beta==0)&(D==0)&(pc==0)&(K>0) # this equilibria might have lambda* = 1, but is actually internally stable
+eqData[mask,]$URstable = 1
+detach(eqData)
 # only use equilibria that are internally stable
-eqData <- eqData %>% filter(URstable==1)
-# add column for learning success and solumns for whether more soc. learning, more conformity, or more anticonformity invade
+eqData <- eqData %>% filter(URstable == 1)
+
+# If C_s is negative when K = 0, then set it to 0
+eqData[(eqData$K==0)&(eqData$C_s<0),]$C_s = 0
+
+# label by whether Increased Social Leanring Invades, Decreased invades, or stable
+eqData$signC_s <- factor(sign(eqData$C_s))
+# thre are about 16 places where r says C_s = 0 but it's actually negative
+eqData$signC_s[eqData$signC_s==0] = -1
+
+eqData$signC_D <- factor(eqData$C_D)
+
+
+# add column for learning success 
 
 eqData$learningSuccess = eqData$u1eq + eqData$u2eq # portion of foragers that learn how to find food
-eqData$xInvades <- eqData$C_s>0
-eqData$y_pos_Invades <- eqData$C_D>0 # more conformity invades
-eqData$y_neg_Invades <- eqData$C_D < 0 # less conformity invades, or if D <=0, anticonformity invades
-# D > 0
-#eqData$totalFood = eqData$r1eq + eqData$r2eq # total food left in the environment
+
 
 # Make separate data frames for whether D \geq 0 or D \leq 0 and for whether or not u1 = u2
 eqDataPos = eqData %>% filter(D>=0)
@@ -65,184 +143,438 @@ eqDataNeg_Equal = eqDataNeg %>% filter(difference==0)
 
 # number of rows where u1 \neq u2 and D < 0: none
 print(nrow(eqData[eqData$D < 0 & eqData$difference > 0,]))
-
-
-uniqueEquilibria %>% filter(URstable==0)
+uniqueEquilibria %>% filter(URstable==-1)
+head(uniqueEquilibria)
 ```
 
-```{r anticonformity W}
-m <- lm(data = eqDataNeg, Weq ~ D)
-cor.test(eqDataNeg$D, eqDataNeg$Weq, method = "spearman", alternative = "less")
+# Numerical Analysis
+## Data
+The dataframes I work with are:
 
-cor.test(eqDataNeg$D, eqDataNeg$learningSuccess, method = "spearman", alternative = "greater")
+* *eqData* - the dataframe of all the parameter and equilibrium combinations that are internally stable
+* *eqDataPos* - the dataframe of all the parameter and equilibrium combinations that are internally stable such that $D \geq 0$
+* *eqDataNeg* -  the dataframe of all the parameter and equilibrium combinations that are internally stable such that $D < 0$
+* *eqDataPos_Equal* - eqDataPos, but only the equilibria in which $|\hat{u_1} - \hat{u_2}| = 0$. 
+* *eqDataPos_UnEqual* - eqDataPos, but only the equilibria in which $|\hat{u_1} - \hat{u_2}| > 0$. -
+
+The important columns of the dataframes are:
+
+* The parameters: K, pc ($\pi_C$), s, mu ($\mu$), beta ($\beta$), 
+* Values found through iteration: u1eq ($\hat{u_1}$), u2eq ($\hat{u_2}$), Weq ($\hat{W}$)
+* Values calculated from the equilibria: difference ($|\hat{u_1} - \hat{u_2}|$), learningSuccess ($\hat{u_1} + \hat{u_2}$), xInvades ($C_s>0$, so more social learning $\delta_K > 0$ invades), y_pos_invades ($C_D > 0$, so more conformity $\delta_D > 0$ invades), and y_neg_invades ($C_D < 0$, so more anticonformity $\delta_D < 0$ invades).  Note that we only work with y_pos_invades when $D \geq 0$, and we only work with y_neg_invades when $D \leq 0$.
+
+## Section 1:Anticonformity, Learning Success, and Mean Population Fitness -->
+In this section, we seek to understand what advantage anticonformity confers. We use Spearman's rank correlation coefficient to examine the relationships between anti-conformity and mean population fitness, $\hat{W}$, and learning success, $\hat{u_1} + \hat{u_2}$, without accounting for social learning $K$. The linear regression of $D, D < 0$ onto both $\hat{W}$ and learning success $\hat{u_1} + \hat{u_2}$ has $R^2 < .01$.
+
+
+
+
+```{r anticonformity W learning success spearman, echo=FALSE, warning=FALSE, message=FALSE}
+
+corWeq <- cor.test(eqDataNeg$D, eqDataNeg$Weq, method = "spearman"); print(corWeq)
+
+corlearn <- cor.test(eqDataNeg$D, eqDataNeg$learningSuccess, method = "spearman"); print(corlearn)
+spearman.ci(eqDataNeg$D, eqDataNeg$learningSuccess, nrep = 1000, conf.level = 0.999)
+```
+
+Using a Spearman's Rank Correlation Test, we cannot reject the null hypothesis that there is no monotonic relationship between  $D$ and $\hat{W}$ for $D < 0$ ($S = `r round(corWeq$statistic,3)`, p = `r round(corWeq$p.value,3)`$), but there is a significant but small monotonic relationship between $D$ and learning success: as anticonformity increases ($D$ becomes more negative), learning success slightly increases ($\rho_s =`r round(corlearn$estimate,3)`, p < `r round(corlearn$p.value,3)`$)
+
+
+For comparison, look at how conformity affects these values
+```{r}
+#mpos <- lm(data=eqDataPos, Weq ~ D)
+#summary(mpos)
+
+cor.test(eqDataPos$Weq, eqDataPos$D, method = "spearman")
+spearman.ci(eqDataPos$D, eqDataPos$Weq, nrep = 1000, conf.level = 0.999)
+
+cor.test(eqDataPos$learningSuccess, eqDataPos$D, method = "spearman")
+spearman.ci(eqDataPos$D, eqDataPos$learningSuccess, nrep = 1000, conf.level = 0.999)
 
 ```
 
-```{r s D when evolve}
-model.xinvades <- glm(data = eqData, xInvades ~ s + D, family = binomial(link = "logit"))
-summary(model.xinvades)
-dat <- eqData %>% filter(xInvades==TRUE)
-min(dat$K)
-lrtest(model.xinvades)
+## Section 2: Positive feedback between the evolution of social learning and learning success
+First, does more social learning correspond with more learning success (regardless of $\pi_c$)?
 
-model.yinvades <- glm(data = eqData, y_pos_Invades ~  s + D, family = binomial(link = "logit"))
-summary(model.yinvades)
-dat <- eqData %>% filter(y_pos_Invades==TRUE)
-min(dat$D)
-lrtest(model.yinvades)
+We try a linear regression of $K$ on learning success $\hat{u_1} + \hat{u_2}$
 
-star.cutoffs <- c(.05, .01,.001)
-stargazer(model.xinvades, model.yinvades,
-          type = "text",
-          dep.var.caption = "", 
-          single.row = TRUE,
-          star.cutoffs = star.cutoffs)
+```{r sec3 lin reg, echo=FALSE, warning=FALSE, message=FALSE}
+
+m1 <- lm(learningSuccess ~ K, data = eqData)
+summary(m1)
 
 ```
-```{r depletion and behavior pref}
-m <- lm(data = eqData, difference ~ beta)
+Social learning seems to correlate with more learning success, though the relationship is not linear.
+Since the relationship is not linear, we try a spearman rank correlation
+```{r sec3 spearman, echo=FALSE, warning=FALSE, message=FALSE}
+ctest <- cor.test(eqData$K, eqData$learningSuccess, method = "spearman")
+ctest
+spearman.ci(eqData$K, eqData$learningSuccess, nrep = 1000, conf.level = 0.999)
+
+```
+
+We see a strong and significant positive correlation ($\rho = .483, p < .001$)
+
+
+However, the logistic regression has a very poor fit (indicated by the log likelihood value),
+
+Instead, we can look at whether learning success values are distributed differently when $C_s >0$, $C_s = 0$, and $C_s < 0$.
+
+```{r}
+attach(eqData)
+# when s = 0, we have a bunch of C_s = 0 values...which should not be like that!
+numerator_correctC_s  <- function(mu,u,beta) -dnorm(0, mean=mu, sd=1) + 4*dnorm(0,mean=mu,sd=1)*(1-beta*u)*u
+numC_s <- numerator_correctC_s(eqData$mu, eqData$u1eq, eqData$beta)
+
+aov <- aov(learningSuccess~signC_s)
+summary(aov)
+plot(aov)
+# require(onewaytests)
+# # heteroscedastic and non-normal so use Kruskal Wallis test
+# kt <- kruskal.test(learningSuccess~signC_s,data=eqData)
+# 
+# posthoc <- pairwise.wilcox.test(learningSuccess, signC_s, p.adjust.method='none')
+# posthoc
+t <- TukeyHSD(aov)
+plot(t)
+
+unique(sign(eqData$C_s))
+eqDataCs0 <- eqData %>% filter(C_s == 0)
+numerator_correctC_s  <- function(mu,u,beta) -dnorm(0, mean=mu, sd=1) + 4*dnorm(0,mean=mu,sd=1)*(1-beta*u)*u
+numC_s <- numerator_correctC_s(eqDataCs0$mu, eqDataCs0$u1eq, eqDataCs0$beta)
+# it's rounding!
+
+#maxs$Tukey = c('a','b','c')
+p.b <- ggplot(data=eqData, aes(x=signC_s,y=learningSuccess,fill=signC_s))+geom_violin(adjust=1) + theme_classic() + labs(x=TeX("$sign(C_s)$"), fill = TeX("$sign(C_s)$"), y = TeX("\\hat{u_1} + \\hat{u_2}"),fontsize=20) + theme(legend.position = "none") 
+
+p.b
+ggsave("LearnSuccess_SignCs.png", plot = p.b)
+
+p.his <- ggplot(data=eqData, aes(x=learningSuccess))+geom_histogram(binwidth=.01) + theme_classic()
+p.his
+ggsave("LearnSuccess_his.png", plot = p.his)
+
+```
+Thus increased social learning tends to invade when learning success is high, especially when $\hat{u_1} + \hat{u_2} = 1$, while the learning success at equilibria for which decreased social learning envades has a bimodal distribution: learning success is either high or low. Furthermore, $C_s \new 0$ for all equilibria in which $K = 0$. 
+
+These trends are slightly different when we analyze equal and unequal equilibria separately. Here are the violin plots when $\hu{1} = \hu{2}$ and $D \geq 0$. I specify $D \geq 0$ because we want to compare the equal and unequal equilibria cases, but equilibria are only unequal when $D \geq 0$. Each violin is labeled with the number of equilibria it describes.
+```{r}
+abs_max = max(learningSuccess)
+maxs <- eqDataPos_Equal %>% group_by(signC_s ) %>% summarise(learningSuccess=max(learningSuccess) + 0.05 * abs_max, n = length(signC_s)) 
+
+
+p.b <- ggplot(data=eqDataPos_Equal, aes(x=signC_s,y=learningSuccess,fill=signC_s))+geom_violin(adjust=1) + theme_classic() + labs(x=TeX("$sign(C_s)$"), fill = TeX("$sign(C_s)$"), y = TeX("\\hat{u_1} + \\hat{u_2}"),fontsize=20)+ geom_text(data=maxs,aes(label=n))
+
+p.b
+```
+Here are violin when $\hu{1} \neq \hu{2}$ and $D \geq 0$. 
+```{r}
+abs_max = max(learningSuccess)
+maxs <- eqDataPos_UnEqual %>% group_by(signC_s ) %>% summarise(learningSuccess=max(learningSuccess) + 0.05 * abs_max, n = length(signC_s)) 
+
+
+p.b <- ggplot(data=eqDataPos_UnEqual, aes(x=signC_s,y=learningSuccess))+geom_violin(position=position_dodge(1)) + theme_classic() + labs(x=TeX("$sign(C_s)$"), y = TeX("\\hat{u_1} + \\hat{u_2}"),fontsize=20)+ geom_text(data=maxs,aes(label=n)) + ylim(0,1.3)
+
+p.b
+
+p.his <- ggplot(data=eqDataPos_UnEqual, aes(x=learningSuccess))+geom_histogram(binwidth=.01) + theme_classic()
+p.his
+```
+
+$C_s \neq 0$ for all equilibria in which $\hu{1} \neq \hu{2}$. Less social learning only invades when $\hu{1} + \hu{2}$ is high., but also most of the equilibria in which $\hu{1} \neq \hu{2}$ have high learning success.
+
+
+Next, I predict that if it is harder to learn individually correctly, then social learning should be even more beneficial to learning success. I use the indicator variable mu_pos, which is 1 when $\mu \geq 0$ and 0 otherwise and do a linear regression of the effect of the interaction between $K$ and mu_pos on learning success.
+
+```{r sec3 mu, echo=FALSE, warning=FALSE, message=FALSE}
+# still have eqData attached
+
+mu_pos = eqData$mu>=0
+eqData$mu_pos = mu_pos
+m.mu <- lm(learningSuccess ~K*mu_pos, data=eqData)
+summary(m.mu)
+stargazer(m.mu, type="text")
+c(m.int, m.K, m.mu_pos, m.mu_pos.K) %<-% m.mu$coefficients
+```
+So when $\mu \geq 0$,
+$$
+\hat{u_1} + \hat{u_2} = .934 + 0.002K
+$$
+and when $\mu < 0$,
+$$
+\hat{u_1} + \hat{u_2} = .227 + .619 K
+$$
+although the $R^2 - .479$, which is rather low.
+
+Now how does $\mu$ affect whether learning success selects for social learning? Again use the indicator variable mu_pos. Then running a logistic regression with the covariates being the interaction of learning success and mu_pos, and the dependent variable being whether increased social learning invades:
+
+```{r chi-squared, warning=F,message=F}
+# mupos is 1 if > 0, 0 if <=0
+mu_nonneg = factor(eqData$mu>=0)
+signC_s = factor(eqData$signC_s)
+SocLearnMuTable <- table(signC_s, mu_nonneg)
+SocLearnMuTable
+
+
+chisq.test(SocLearnMuTable)
+
+
+datuse <- data.frame(mu_nonneg, signC_s)
+datuse <- datuse %>% group_by(mu_nonneg, signC_s) %>% count()
+
+p <- ggplot(datuse, aes(x = mu_nonneg, y = n, fill = signC_s)) + geom_bar(position="stack",stat="identity") + labs(y="Num Equilibria", fill = TeX("$\\sign(C_s)$"), x = TeX("$\\mu \\geq 0$")) + theme_classic()
+p
+ggsave("Figures/MuSocLearnStack.png", plot = p)
+```
+
+
+## Section 3: The effects of social learning and conformity on behavioral preference
+
+I hypothesized that social learning ($K$), conformity ($D$), and in particularly the product of the two ($KD$) should cause larger behavioral preference $$ |\hat{u_1} - \hat{u_2}|$$. 
+In this case behavioral preference was measured from the equilibrium that had the maximum $$\mid \hat{u_1} – \hat{u_2} \mid $$ for each set of parameters.
+Doing a linear regression of behavioral preference in relation to $K$, $D$, and $KD$, the coefficients are described in the following table:
+
+```{r sec4, echo=FALSE, warning=FALSE, message=FALSE}
+#eqdata already attached
+eqData.maxDiff <- eqDataPos %>%
+  group_by(s,K,D,mu,beta) %>%
+  summarise(max_diff = max(difference)) %>% 
+  mutate(KD = K*D)
+
+attach(eqData.maxDiff)
+m <- lm(max_diff ~ K*D, data=eqData.maxDiff)
 summary(m)
-cor.test(eqData$beta, eqData$difference, method = "spearman", alternative = "less")
+stargazer(m, type = "text", covariate.labels = c("K","D", "KD"), dep.var.labels = "Maximum Behavioral Preference")
+plotH2 <- ggplot(data = eqData.maxDiff, mapping = aes(x = KD, y = max_diff)) + geom_point(size = 3, shape = 1) + theme_bw()
+plotH2 <- plotH2 + labs(x = TeX("$KD$"), y = "Max Behavioral Preference")  
+plotH2
+ggsave("Figures/plotH2.png", plot = plotH2) # still calling it H2 because when I originally named these plots I called this section was hypothesis 2
 ```
+Social learning has  a positive effect as expected, but conformity has a negative effect, which is weird. Finally, as expected, social learning and conformity together increase behavioral preference more then social learning alone. 
+
+## Section 4: The effects of food depletion and behavioral preference on learning success and mean population fitness.
+
+I expected that increasing predation, $\beta$, would suppress learning success $\hat{u_1} + \hat{u_2}$ , 
+and for this effect to be amplified by behavioral preference $|\hat{u_1} - \hat{u_2}|$.
 
 
+I check the effect of $\beta$ and its interaction with an indicator variable called "isDiff" that is 1 when $\hat{u_1} \neq \hat{u_2}$, 0 otherwise. *Question: Should I be doing pairwise comparisons between equilibria within each set of parameters $(\mu,s,D,\beta)$?*
 
-```{r H1}
-# how do behavior preference and effect of predation together affect mean population fitness and learning success?
-# do mlr, ind. vars = beta, difference. dependent variables are (1) W and then (2) u1 + u2.
-# do for u1 = u2, thus only looking at how beta affects learning success. Then, to compare, do for u1 \neq u2. For this comparison to be 'fair', have D \geq 0.
-
-model.LS.H1.eq <- lm(data = eqDataPos_Equal, learningSuccess ~ beta)
-summary(model.LS.H1.eq)
-nrow(eqDataPos_Equal)
-##  The alternative hypothesis of interest is that the LS is negatively associated with food depletability.
-cor.test(eqDataPos_Equal$beta, eqDataPos_Equal$learningSuccess,method = "spearman", alternative = "greater")
-summary(lm(data = eqDataNeg_Equal, learningSuccess ~ beta))
-cor.test(eqDataNeg_Equal$beta, eqDataNeg_Equal$learningSuccess, method = "spearman", alternative = "less")
-
-model.W.H1.eq <- lm(data = eqDataNeg_Equal, Weq ~ beta)
-summary(model.W.H1.eq)
-cor.test(eqDataPos_Equal$beta, eqDataPos_Equal$Weq,method = "spearman", alternative = "less")
-cor.test(eqDataNeg_Equal$beta, eqDataNeg_Equal$Weq,method = "spearman", alternative = "less")
-
-model.LS.H1.UE <- lm(data = eqDataPos_UnEqual, learningSuccess ~ beta*difference)
-summary(model.LS.H1.UE)
-dat = eqDataPos_UnEqual
-cor.test(dat$beta*dat$difference, dat$learningSuccess, method = "spearman", alternative = "less")
-plot(model.LS.H1.UE) # not a good model if look at QQ plot of residuals vs predicted values
-model.W.H1.UE <- lm(data = eqDataPos_UnEqual, Weq ~ beta*difference)
-summary(model.W.H1.UE)
-
-# maybe s is caused behavior difference to be beneficial?
-model.LS.H1.UE.s <- lm(data = eqDataPos_UnEqual, learningSuccess ~ s*difference+beta*difference)
-summary(model.LS.H1.UE.s)
-# no it doesn't tell you anything
-
-# USE THESE: 
-
+```{r sec5, echo=FALSE, warning=FALSE, message=FALSE}
+attach(eqData)
+isDiff = difference > 0
+m1 <- lm(Weq ~ isDiff*beta)
+c(m1.int, m1.isDiff, m1.beta, m1.isDiff.beta) %<-% m1$coefficients
+stargazer(m1, type = "text",covariate.labels = c("isDiff=TRUE", "beta", "beta(isDiff=TRUE)"), dep.var.labels = "Mean Pop Fitness")
 library(ggplot2)
+
+
 datUse = eqDataPos %>% mutate(betadiff = beta*difference)
 plotH1.LS <- ggplot(data = datUse, mapping = aes(x = difference, y = learningSuccess, color = beta)) + geom_point(size = 3, alpha = 0.5) + theme_bw()+ labs(x = TeX("$|\\hat{u_1} - \\hat{u_2}|$"), y = TeX("$\\hat{u_1} + \\hat{u_2}$"), color = TeX("$\\beta$")) 
 plotH1.LS
 ggsave("Figures/plotH1_LS.png", plot = plotH1.LS)
+```
+
+So if $\hat{u_1} \neq \hat{u_2}$,
+$$
+\hat{W} = `r m1.int + m1.isDiff` + `r m1.beta + m1.isDiff.beta` \beta + \text{residuals}
+$$
+and if $\hat{u_1} = \hat{u_2}$,
+$$
+\hat{W} = `r m1.int` + `r m1.beta` \beta + \text{residuals}.
+$$
+
+As for learning success, a linear regression with isDiff and beta as covariates is described by the following table:
+```{r sec5 ls, echo=FALSE, warning=FALSE, message=FALSE}
+m2 <- lm(learningSuccess ~ isDiff*beta)
+c(m2.int, m2.isDiff, m2.beta, m2.isDiff.beta) %<-% m2$coefficients
+stargazer(m2, type = "text",covariate.labels = c("isDiff=TRUE", "beta", "beta(isDiff=TRUE)"), dep.var.labels = "Learning Success")
+
+
 
 plot.H1.W <- ggplot(data = datUse, mapping = aes(x = difference, y = Weq, color = beta)) + geom_point(size=3, alpha = 0.5) + theme_bw() + labs(x = TeX("$|\\hat{u_1} - \\hat{u_2}|$"), y = TeX("$\\hat{W}$"), color = TeX("$\\beta$")) 
 plot.H1.W
-ggsave("Figures/plotH1_W.png", plot = plot.H1.W)
+#ggsave("Figures/plotH1_W.png", plot = plot.H1.W)
+
+```
+So if $\hat{u_1} \neq \hat{u_2}$,
+$$
+\hat{u_1} + \hat{u_2}= `r m2.int + m2.isDiff` + `r m2.beta + m2.isDiff.beta` \beta + \text{residuals}
+$$
+and if $\hat{u_1} = \hat{u_2}$,
+$$
+\hat{u_1} + \hat{u_2} = `r m2.int` + `r m2.beta` \beta + \text{residuals}
+$$
 
 
-model.W.H1 <- lm(data = eqDataPos, Weq ~ beta*difference)
-summary(model.W.H1)
+However, the $R^2 on these are terrible.
 
+Correlations when $\hu{1} = \hu{2}$
+```{r, message=F}
+attach(eqData)
+isDiff = difference > 0
+cor.test(eqData$Weq[!isDiff],eqData$beta[!isDiff], method = "spearman")
+spearman.ci(eqData$Weq[!isDiff],eqData$beta[!isDiff],nrep=1000,conf.level=0.999)
+
+
+cor.test(eqData$Weq[isDiff], eqData$beta[isDiff], method = "spearman")
+spearman.ci(eqData$Weq[isDiff],eqData$beta[isDiff],nrep=1000,conf.level=0.999)
 ```
 
 
-```{r H2}
-# Hypothesis: Social learning and conformity cause more behavioral preference.
-# Multiple linear regression with the independent variables being s, D, and sD, while the
-#dependent variable is |u1 - u2|
+```{r, message=F}
+attach(eqData)
 
+isDiff = difference > 0
 
-# use D \geq 0
+cor.test(eqData$learningSuccess[!isDiff],eqData$beta[!isDiff], method = "spearman")
 
-eqData.maxDiff <- eqDataPos %>%
-  group_by(s,K,D,mu,beta) %>%
-  summarise(max_diff = max(difference)) %>% 
-  mutate(sD = s*D)
-model.H2 <- lm(data = eqData.maxDiff, max_diff ~ s* D)
-summary(model.H2)
-plot(model.H2)
+cor.test(eqData$learningSuccess[isDiff], eqData$beta[isDiff], method = "spearman")
+spearman.ci(eqData$learningSuccess[isDiff], eqData$beta[isDiff],nrep=1000,conf.level=0.999)
+```
+## Section 5: Food depletion and behavioral preference
+First I try a linear regression
 
-ols_test_breusch_pagan(model.H2) # got a low p-value so heteroscedastic. can't use lm and logistic ?
+```{r sec6 depletion and behavior pref, echo=FALSE, warning=FALSE, message=FALSE}
 
+m <- lm(data = eqData, difference ~ beta)
+stargazer(m, type = "text", dep.var.labels = "behavioral preference")
+cortest <- cor.test(eqData$beta, eqData$difference, alternative = "less")
+cortest
+confint(cortest)
+install.packages('RVAideMemoire')
+require(RVAideMemoire) # library that has spearman.ci function...gets confidence intervals on spearman using bootstrap
+s
+cortest <- cor.test(eqData$beta, eqData$difference, method = "spearman")
+cortest
+spearman.ci(eqData$beta, eqData$difference, nrep = 1000, conf.level = 0.999)
+```
+For the linear model, the $R^2$ is too low. I use Spearman's rank instead, and find the correlation between $\beta$ and behavioral preference is $\rho = `r cortest$estimate`, p = `r cortest$p.value`$. The $\rho$ value is close to the coefficient of $\beta$ in the linear model, and I'm wondering if I can still use the linear model to say that increasing predation $\beta$ makes the population show less behavioral preference.
 
-datUse = eqData.maxDiff
-# i need a regression line
-dat_predict <- datUse[c('s','D','sD')]
-dat_predict$max_diff <- predict(model.H2, new.data = dat_predict)
+## Section 6: Food depletion hampers the evolution of social learning and conformity
+```{r D0}
+eqDataD0 <- eqData %>% filter(D==0)
+eqDataD0$mu_pos <- eqDataD0$mu >=0
 
-plotH2 <- ggplot(data = datUse, mapping = aes(x = sD, y = max_diff)) + geom_point(size = 3, shape = 1) + theme_bw()
-plotH2 <- plotH2 + labs(x = TeX("$sD$"), y = TeX("$|\\hat{u_1} - \\hat{u_2}|$"))  
-plotH2
-ggsave("Figures/plotH2.png", plot = plotH2)
+set.seed(5)
+eqDataD0.1 <- eqDataD0 %>% filter(mu_pos==TRUE)
+eqDataD0.2 <- eqDataD0 %>% filter(mu_pos==FALSE)
+cortest <- cor.test(eqDataD0$C_s, eqDataD0$beta, method="spearman")
+cortest
+spearman.ci(eqDataD0$C_s, eqDataD0$beta, nrep = 1000, conf.level=0.999)
+set.seed(5)
+cortest1 <- cor.test( eqDataD0.1$C_s, eqDataD0.1$beta, method = "spearman")
+cortest1
+spearman.ci(eqDataD0.1$beta, eqDataD0.1$C_s, nrep = 1000, conf.level = 0.999)
+set.seed(5)
+cortest2 <- cor.test( eqDataD0.2$C_s, eqDataD0.2$beta, method = "spearman")
+cortest2
+spearman.ci(eqDataD0.2$beta, eqDataD0.2$C_s, nrep = 1000, conf.level = 0.95)
 
+p <- ggplot(data = eqDataD0, aes(x=beta,y=C_s,color=mu_pos )) + geom_jitter() + geom_smooth(method=lm,se=FALSE, fullrange=TRUE) + theme_classic()  + labs(x=TeX("$\\beta$"), y=TeX("$C_s$"), colour = TeX("$\\mu \\geq 0$"),fontsize=20) + scale_color_manual(breaks = c(FALSE, TRUE),values=c("red", "#56B4E9")) + geom_hline(yintercept=0,linetype="dashed", size=0.5)
+p
+ggsave("Figures/D0jitter.png", plot = p)
 
-df_use = eqData.maxDiff %>% filter(mu==-0.5)
-plot(df_use$sD, df_use$max_diff) # TO-DO// then try coloring by mu and beta
-
-# issue: each set of parameters has u1 = u2 as an equilibria, but not all have u1 \neq u2 as equilibria. What if instead I looked at max difference
-
-max(eqData.maxDiff$max_diff)
+eqDataD0_x_pos <- eqDataD0 %>% filter(x_pos_invades==TRUE)
+nrow(eqDataD0)
+nrow(eqDataD0_x_pos)
+max(eqDataD0_x_pos$beta)
 ```
 
-``` {r H3}
+I use logistic regressions to examine the effect of food depletion, in combination with the indicator variable isDiff (which is 1 if $\hat{u_1}\neq \hat{u_2}$, 0 if $\hat{u_1} = \hat{u_2}$), on whether $C_s > 0$ and on whether $C_D > 0$. The logistic regression on whether increased conformity invades, $C_D > 0$, is only conducted on equilibria in which $D \geq 0$.
+
+``` {r sec7, echo=FALSE, warning=FALSE, message=FALSE}
+# Does increasing K from 0 cause there to be a difference between u_1 and u_2? A: no
+smallK <- eqData %>% filter(round(K,2) ==0.01) %>% filter(difference>0)
+
 # As beta increases, and u1 \neq u2, then conformity and social learning will be less likely to invade
-datUse1 = eqDataPos_UnEqual
-datUse2 = eqDataPos_Equal
-
-model.y.H3 <- glm(data = datUse1, y_pos_Invades ~ beta, family = binomial(link="logit"))
-lrtest(model.y.H3)
-summary(model.y.H3)
-stargazer(model.y.H3, type = "text", single.row = TRUE)
-
-model.x.H3 <- glm(data = datUse1, xInvades ~ beta, family = binomial(link="logit"))
-lrtest(model.x.H3)
-stargazer(model.x.H3, type = "text", single.row = TRUE)
-summary(model.x.H3)
-p_lratiotest(model.x.H3)
-
-dat = datUse1 %>% filter(mu < 0)
-model.x.H3.muneg <- glm(data = dat, xInvades ~ beta, family = binomial(link="logit"))
-lrtest(model.x.H3.muneg)
-summary(model.x.H3.muneg)
+# use variable isDiff
 
 
-datUse2 = eqData %>% filter(difference == 0, mu < 0)
-model.x.H3.eq <- glm(data = datUse2,xInvades ~ beta, family = binomial(link="logit"))
-summary(model.x.H3.eq)
-lrtest(model.x.H3.eq)
+eqDataPos$isDiff = eqDataPos$difference>0
+eqData$isDiff = eqData$difference>0
 
-plot(model.H3)
+model.y <- glm(data = eqDataPos, y_pos_invades ~ beta*isDiff, family = binomial(link="logit"))
+model.x <- glm(data = eqData, xInvades ~ beta*isDiff, family = binomial(link = "logit"))
+stargazer(model.x, type = "text", dep.var.labels = "Increased social learning invades", covariate.labels = c("beta", "isDiff = TRUE", "beta(isDiff=TRUE)"))
+lrtest(model.x)
+stargazer(model.y, type = "text", dep.var.labels = "Increased conformity invades", covariate.labels = c("beta", "isDiff = TRUE", "beta(isDiff=TRUE)"))
+lrtest(model.y)
+
+
+```
+It seems beta and the indicator variable of whether $\hat{u_1} \neq \hat{u_2}$ do not have any effect on whether increased conformity invades.
+
+
+HOWEVER, these logistic regressions are terrible. I'll have to do the violin plots method instead
+```{r}
+
+#maxs$Tukey = c('a','b','c')
+
+p.b <- ggplot(data=eqData, aes(x=signC_s,y=beta,fill=isDiff))+geom_boxplot(adjust=1, scale = "count") + theme_classic() + labs(x=TeX("$sign(C_s)$"), y = TeX("$\\beta$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+
+p.b <- p.b + scale_fill_discrete(name = "Behavioral Preference", labels = c("no behavioral preference","positive behavioral preference"))
+p.b
+ggsave("Figures/BehavPref_boxplot.png", plot = p.b)
+aov <- aov(beta ~ signC_s*isDiff)
+summary(aov)
+
+aov1 <- aov(beta~ factor(isDiff), subset=signC_s==1)
+summary(aov1)
+TukeyHSD(aov1)
 ```
 
-```{r H4}
-#If information in the environment is difficult to attain (mu < 0), then increased social learning will bring more learning success. Furthermore, in this situation more learning success will select for more social learning, increasing the probability that C_s > 0
-datUse1 <- eqData %>% filter(mu<0)
-m1.H4 <- lm(data = datUse1, learningSuccess ~ s)
-cor.test(datUse1$s, datUse1$learningSuccess,method = "spearman", alternative = "greater")
-summary(m1.H4)
 
-m1.H4.rev <- glm(data = datUse1, xInvades ~ learningSuccess, family = binomial(link = logit))
-summary(m1.H4.rev)
-lrtest(m1.H4.rev)
 
-datUse2 <- eqData %>% filter(mu>=0)
-m2.H4 <- lm(data = datUse2, learningSuccess ~ s)
-summary(m2.H4)
-cor.test(datUse2$s,datUse2$learningSuccess,method = "spearman", alternative = "greater")
-m2.H4.rev <- glm(data = datUse2, xInvades ~ learningSuccess, family = binomial(link = logit))
-summary(m2.H4.rev)
-p_lratiotest(m2.H4.rev)
+```{r}
+
+attach(eqDataPos)
+isDiff = difference>0
+
+dat = eqDataPos %>% filter(difference>0)
+
+p.b <- ggplot(data=dat, aes(x=factor(y_pos_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Increased Conformity Evolves", y = TeX("$\\beta$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+
+p.b
+
+ggsave("Figures/BehavPref_boxplot_D.png", plot = p.b)
+
+p.b <- ggplot(data=dat, aes(x=factor(y_neg_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Decreased Conformity Evolves", y = TeX("$\\beta$"),title = TeX("$\\hat{u_1} \\neq \\hat{u_2}$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+
+p.b
+
+ggsave("Figures/BehavPref_boxplot_pos_diff_Dless.png", plot = p.b)
+
+p.b <- ggplot(data=eqData %>% filter(difference==0), aes(x=factor(y_neg_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Decreased Conformity Evolves", y = TeX("$\\beta$"), title = TeX("$\\hat{u_1} = \\hat{u_2}$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+
+p.b
+
+ggsave("Figures/BehavPref_boxplot_pos_nodiff_Dless.png", plot = p.b)
+
+
+# aov <- aov(beta ~ factor(signC_D)*factor(isDiff))
+# summary(aov)
+# aov1 <- aov(beta~signC_D)
+# TukeyHSD(aov1)
+# aov2 <- aov(beta~signC_D, subset=isDiff) #when hu1 \neq hu2
+# aov3 <- aov(beta~signC_D, subset=!isDiff) #when hu1 = hu2
+# t <- TukeyHSD(aov)
+# t$`factor(signC_D):factor(isDiff)`
+# plot(t$`factor(signC_D):factor(isDiff)`)
+
+
+```
+
+
+```{r}
+#maxs$Tukey = c('a','b','c')
+attach(eqDataNeg)
+p.b <- ggplot(data=eqDataPos, aes(x=signC_D,y=beta))+geom_boxplot() + theme_classic() + labs(x=TeX("$sign(C_D)$"), y = TeX("$\\beta$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+
+p.b
+ggsave("Figures/BehavPref_boxplot_Dneg.png", plot = p.b)
+aov <- aov(eqDataNeg$beta ~ eqDataNeg$signC_D)
+summary(aov)
 
 
 ```
@@ -250,7 +582,7 @@ p_lratiotest(m2.H4.rev)
 
 To-do: Do D < 0 and D > 0 separately
 
-```{r ternary Unequal}
+```{r }
 #detach("package:plotly", unload = TRUE)
 library(ggplot2)
 library(ggtern)
@@ -259,37 +591,58 @@ library(latex2exp)
 
 datUse = eqDataPos
 
+# beta
 
-plotC_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = xInvades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
-plotC_s <- plotC_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"),color = TeX("$C_s > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotC_s
-ggsave("Figures/ternaryAll_C_s.png", plot = plotC_s)
+plotBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
+plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotBeta
+ggsave("Figures/ternaryAllbeta.png", plot = plotBeta)
 
-plotC_D <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = y_pos_Invades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
-plotC_D <- plotC_D + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), color = TeX("$C_D > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotC_D
-ggsave("Figures/ternaryAll_C_D.png", plot = plotC_D)
+# K
 
+plotK <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = K), alpha = 0.5, size = 3, shape = 1) + theme_bw()
+plotK <- plotK + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'K') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotK
+ggsave("Figures/ternaryAll_K.png", plot = plotK)
+
+# D
 
 plotD <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = D), size = 5, alpha = 0.5, shape = 1) + theme_bw()
 plotD <- plotD + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
 plotD
 ggsave("Figures/ternaryAll_bigD.png", plot = plotD)
 
+#mu
+
 plotMU <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = mu), size = 3, alpha = 0.5, shape = 1) + theme_bw()
 plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
 plotMU
 ggsave("Figures/ternaryAllMU.png", plot = plotMU)
 
-plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), alpha = 0.5, size = 3, shape = 1) + theme_bw() 
+# C_s
+
+plotC_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = xInvades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotC_s <- plotC_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"),color = TeX("$C_s > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotC_s
+ggsave("Figures/ternaryAll_C_s.png", plot = plotC_s)
+
+#C_D
+
+plotC_D <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = y_pos_invades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotC_D <- plotC_D + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), color = TeX("$C_D > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotC_D
+ggsave("Figures/ternaryAll_C_D.png", plot = plotC_D)
+
+
+
+
+
+plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
 plotd <- plotd + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'd') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
 plotd
 ggsave("Figures/ternaryAll_d.png", plot = plotd)
 
-plotBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotBeta
-ggsave("Figures/ternaryAllbeta.png", plot = plotBeta)
+
 
 plotDBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = D*beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
 plotDBeta <- plotDBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$D*\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
@@ -300,6 +653,9 @@ plotmu_s<- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + 
 plotmu_s <- plotmu_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$s*\\mu$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
 plotmu_s
 ggsave("Figures/ternary_mu_s.png", plot = plotmu_s)
+
+
+
 
 plot_s_d <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = D*s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
 plot_s_d <- plot_s_d + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$s*D$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
@@ -327,7 +683,7 @@ plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX
 plotMU
 ggsave("Figures/ternaryAllMU_UE.png", plot = plotMU)
 
-plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), alpha = 0.5, size = 3, shape = 1) + theme_bw() 
+plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
 plotd <- plotd + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'd') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
 plotd
 ggsave("Figures/ternaryAll_d_UE.png", plot = plotd)
