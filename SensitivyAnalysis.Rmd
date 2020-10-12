@@ -245,12 +245,12 @@ numC_s <- numerator_correctC_s(eqDataCs0$mu, eqDataCs0$u1eq, eqDataCs0$beta)
 # it's rounding!
 
 #maxs$Tukey = c('a','b','c')
-p.b <- ggplot(data=eqData, aes(x=signC_s,y=learningSuccess,fill=signC_s))+geom_violin(adjust=1) + theme_classic() + labs(x=TeX("$sign(C_s)$"), fill = TeX("$sign(C_s)$"), y = TeX("\\hat{u_1} + \\hat{u_2}"),fontsize=20) + theme(legend.position = "none") 
+p.b <- ggplot(data=eqData, aes(x=signC_s,y=learningSuccess,fill=signC_s))+geom_violin(adjust=1) + theme_classic() + labs(x=TeX("$sign(C_s)$"), fill = TeX("$sign(C_s)$"), y = TeX("\\hat{u_1} + \\hat{u_2}"),fontsize=20) + theme(legend.position = "none") + theme(text = element_text(size = 20)) 
 
 p.b
 ggsave("LearnSuccess_SignCs.png", plot = p.b)
 
-p.his <- ggplot(data=eqData, aes(x=learningSuccess))+geom_histogram(binwidth=.01) + theme_classic()
+p.his <- ggplot(data=eqData, aes(x=learningSuccess))+geom_histogram(binwidth=.01) + theme_classic() + theme(text = element_text(size = 20)) + labs(x = "Learning Success")
 p.his
 ggsave("LearnSuccess_his.png", plot = p.his)
 
@@ -322,7 +322,7 @@ chisq.test(SocLearnMuTable)
 datuse <- data.frame(mu_nonneg, signC_s)
 datuse <- datuse %>% group_by(mu_nonneg, signC_s) %>% count()
 
-p <- ggplot(datuse, aes(x = mu_nonneg, y = n, fill = signC_s)) + geom_bar(position="stack",stat="identity") + labs(y="Num Equilibria", fill = TeX("$\\sign(C_s)$"), x = TeX("$\\mu \\geq 0$")) + theme_classic()
+p <- ggplot(datuse, aes(x = mu_nonneg, y = n, fill = signC_s)) + geom_bar(position="stack",stat="identity") + labs(y="Num Equilibria", fill = TeX("$\\sign(C_s)$"), x = TeX("$\\mu \\geq 0$")) + theme_classic()+ theme(text = element_text(size = 20)) 
 p
 ggsave("Figures/MuSocLearnStack.png", plot = p)
 ```
@@ -361,6 +361,7 @@ and for this effect to be amplified by behavioral preference $|\hat{u_1} - \hat{
 I check the effect of $\beta$ and its interaction with an indicator variable called "isDiff" that is 1 when $\hat{u_1} \neq \hat{u_2}$, 0 otherwise. *Question: Should I be doing pairwise comparisons between equilibria within each set of parameters $(\mu,s,D,\beta)$?*
 
 ```{r sec5, echo=FALSE, warning=FALSE, message=FALSE}
+
 attach(eqData)
 isDiff = difference > 0
 m1 <- lm(Weq ~ isDiff*beta)
@@ -370,7 +371,7 @@ library(ggplot2)
 
 
 datUse = eqDataPos %>% mutate(betadiff = beta*difference)
-plotH1.LS <- ggplot(data = datUse, mapping = aes(x = difference, y = learningSuccess, color = beta)) + geom_point(size = 3, alpha = 0.5) + theme_bw()+ labs(x = TeX("$|\\hat{u_1} - \\hat{u_2}|$"), y = TeX("$\\hat{u_1} + \\hat{u_2}$"), color = TeX("$\\beta$")) 
+plotH1.LS <- ggplot(data = datUse, mapping = aes(x = difference, y = learningSuccess, color = beta)) + geom_point(size = 3, alpha = 0.5) + theme_bw()+ labs(x = TeX("$|\\hat{u_1} - \\hat{u_2}|$"), y = TeX("$\\hat{u_1} + \\hat{u_2}$"), color = TeX("$\\beta$")) + theme(text = element_text(size = 20)) 
 plotH1.LS
 ggsave("Figures/plotH1_LS.png", plot = plotH1.LS)
 ```
@@ -471,7 +472,7 @@ cortest2 <- cor.test( eqDataD0.2$C_s, eqDataD0.2$beta, method = "spearman")
 cortest2
 spearman.ci(eqDataD0.2$beta, eqDataD0.2$C_s, nrep = 1000, conf.level = 0.95)
 
-p <- ggplot(data = eqDataD0, aes(x=beta,y=C_s,color=mu_pos )) + geom_jitter() + geom_smooth(method=lm,se=FALSE, fullrange=TRUE) + theme_classic()  + labs(x=TeX("$\\beta$"), y=TeX("$C_s$"), colour = TeX("$\\mu \\geq 0$"),fontsize=20) + scale_color_manual(breaks = c(FALSE, TRUE),values=c("red", "#56B4E9")) + geom_hline(yintercept=0,linetype="dashed", size=0.5)
+p <- ggplot(data = eqDataD0, aes(x=beta,y=C_s,color=mu_pos )) + geom_jitter() + geom_smooth(method=lm,se=FALSE, fullrange=TRUE) + theme_classic()  + labs(x=TeX("$\\beta$"), y=TeX("$C_s$"), colour = TeX("$\\mu \\geq 0$"),fontsize=20) + scale_color_manual(breaks = c(FALSE, TRUE),values=c("red", "#56B4E9")) + geom_hline(yintercept=0,linetype="dashed", size=0.5)+ theme(text = element_text(size = 20)) 
 p
 ggsave("Figures/D0jitter.png", plot = p)
 
@@ -511,7 +512,7 @@ HOWEVER, these logistic regressions are terrible. I'll have to do the violin plo
 
 #maxs$Tukey = c('a','b','c')
 
-p.b <- ggplot(data=eqData, aes(x=signC_s,y=beta,fill=isDiff))+geom_boxplot(adjust=1, scale = "count") + theme_classic() + labs(x=TeX("$sign(C_s)$"), y = TeX("$\\beta$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+p.b <- ggplot(data=eqData, aes(x=signC_s,y=beta,fill=isDiff))+geom_boxplot(adjust=1, scale = "count") + theme_classic() + labs(x=TeX("$sign(C_s)$"), y = TeX("$\\beta$"),fontsize=20)+ theme(text = element_text(size = 20))  #+ geom_text(data=maxs,aes(label=Tukey))
 
 p.b <- p.b + scale_fill_discrete(name = "Behavioral Preference", labels = c("no behavioral preference","positive behavioral preference"))
 p.b
@@ -533,19 +534,19 @@ isDiff = difference>0
 
 dat = eqDataPos %>% filter(difference>0)
 
-p.b <- ggplot(data=dat, aes(x=factor(y_pos_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Increased Conformity Evolves", y = TeX("$\\beta$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+p.b <- ggplot(data=dat, aes(x=factor(y_pos_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Increased Conformity Evolves", y = TeX("$\\beta$"),fontsize=20) + theme(text = element_text(size = 20),axis.title.x = element_text(vjust=-1.1)) #+ geom_text(data=maxs,aes(label=Tukey))
 
 p.b
 
 ggsave("Figures/BehavPref_boxplot_D.png", plot = p.b)
 
-p.b <- ggplot(data=dat, aes(x=factor(y_neg_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Decreased Conformity Evolves", y = TeX("$\\beta$"),title = TeX("$\\hat{u_1} \\neq \\hat{u_2}$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+p.b <- ggplot(data=dat, aes(x=factor(y_neg_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Decreased Conformity Evolves", y = TeX("$\\beta$"),title = TeX("$\\hat{u_1} \\neq \\hat{u_2}$"),fontsize=20) + theme(text = element_text(size = 20),axis.title.x = element_text(vjust=-1.1)) #+ geom_text(data=maxs,aes(label=Tukey)) 
 
 p.b
 
 ggsave("Figures/BehavPref_boxplot_pos_diff_Dless.png", plot = p.b)
 
-p.b <- ggplot(data=eqData %>% filter(difference==0), aes(x=factor(y_neg_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Decreased Conformity Evolves", y = TeX("$\\beta$"), title = TeX("$\\hat{u_1} = \\hat{u_2}$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
+p.b <- ggplot(data=eqData %>% filter(difference==0), aes(x=factor(y_neg_invades),y=beta))+geom_boxplot() + theme_classic() + labs(x="Decreased Conformity Evolves", y = TeX("$\\beta$"), title = TeX("$\\hat{u_1} = \\hat{u_2}$"),fontsize=20) + theme(text = element_text(size = 20),axis.title.x = element_text(vjust=-1.1)) #+ geom_text(data=maxs,aes(label=Tukey))
 
 p.b
 
@@ -566,20 +567,6 @@ ggsave("Figures/BehavPref_boxplot_pos_nodiff_Dless.png", plot = p.b)
 ```
 
 
-```{r}
-#maxs$Tukey = c('a','b','c')
-attach(eqDataNeg)
-p.b <- ggplot(data=eqDataPos, aes(x=signC_D,y=beta))+geom_boxplot() + theme_classic() + labs(x=TeX("$sign(C_D)$"), y = TeX("$\\beta$"),fontsize=20) #+ geom_text(data=maxs,aes(label=Tukey))
-
-p.b
-ggsave("Figures/BehavPref_boxplot_Dneg.png", plot = p.b)
-aov <- aov(eqDataNeg$beta ~ eqDataNeg$signC_D)
-summary(aov)
-
-
-```
-
-
 To-do: Do D < 0 and D > 0 separately
 
 ```{r }
@@ -591,76 +578,24 @@ library(latex2exp)
 
 datUse = eqDataPos
 
-# beta
-
-plotBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotBeta
-ggsave("Figures/ternaryAllbeta.png", plot = plotBeta)
-
-# K
-
-plotK <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = K), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotK <- plotK + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'K') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotK
-ggsave("Figures/ternaryAll_K.png", plot = plotK)
-
-# D
-
-plotD <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = D), size = 5, alpha = 0.5, shape = 1) + theme_bw()
-plotD <- plotD + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotD
-ggsave("Figures/ternaryAll_bigD.png", plot = plotD)
-
-#mu
-
-plotMU <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = mu), size = 3, alpha = 0.5, shape = 1) + theme_bw()
-plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotMU
-ggsave("Figures/ternaryAllMU.png", plot = plotMU)
+head(datUse)
 
 # C_s
 
-plotC_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = xInvades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
-plotC_s <- plotC_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"),color = TeX("$C_s > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotC_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = x_pos_invades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotC_s <- plotC_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"),color = TeX("$C_s > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))  + theme(text = element_text(size = 18))
 plotC_s
 ggsave("Figures/ternaryAll_C_s.png", plot = plotC_s)
 
 #C_D
 
 plotC_D <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = y_pos_invades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
-plotC_D <- plotC_D + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), color = TeX("$C_D > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotC_D <- plotC_D + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), color = TeX("$C_D > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
 plotC_D
 ggsave("Figures/ternaryAll_C_D.png", plot = plotC_D)
 
 
 
-
-
-plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotd <- plotd + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'd') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotd
-ggsave("Figures/ternaryAll_d.png", plot = plotd)
-
-
-
-plotDBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = D*beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotDBeta <- plotDBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$D*\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotDBeta
-ggsave("Figures/ternaryDbeta.png", plot = plotDBeta)
-
-plotmu_s<- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = mu*s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotmu_s <- plotmu_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$s*\\mu$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plotmu_s
-ggsave("Figures/ternary_mu_s.png", plot = plotmu_s)
-
-
-
-
-plot_s_d <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = D*s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plot_s_d <- plot_s_d + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$s*D$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
-plot_s_d
-ggsave("Figures/ternary_s_d.png", plot = plot_s_d)
 
 ```
 
@@ -672,26 +607,27 @@ library(ggtern)
 library(latex2exp)
 
 
-datUse = eqDataNeg
+datUse = eqDataPos
 plotD <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = D), size = 5, alpha = 0.5, shape = 1) + theme_bw()
-plotD <- plotD + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotD <- plotD + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
 plotD
-ggsave("Figures/ternaryAll_bigD_UE.png", plot = plotD)
+ggsave("Figures/ternaryAll_bigD.png", plot = plotD)
 
 plotMU <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = mu), size = 3, alpha = 0.5, shape = 1) + theme_bw()
-plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
 plotMU
-ggsave("Figures/ternaryAllMU_UE.png", plot = plotMU)
+ggsave("Figures/ternaryAllMU.png", plot = plotMU)
 
-plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotd <- plotd + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'd') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = K), alpha = 0.5, size = 3, shape = 1) + theme_bw()
+plotd <- plotd + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'd') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
+
 plotd
-ggsave("Figures/ternaryAll_d_UE.png", plot = plotd)
+ggsave("Figures/ternaryAll_K.png", plot = plotd)
 
 plotBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
 plotBeta
-ggsave("Figures/ternaryAllbeta_UE.png", plot = plotBeta)
+ggsave("Figures/ternaryAllbeta.png", plot = plotBeta)
 
 
 ```
