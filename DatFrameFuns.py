@@ -6,23 +6,11 @@ import pandas as pd
 #for parallelizing:
 import multiprocessing as mp
 from pathos.multiprocessing import ProcessingPool as Pool
+# for solving when iterations take too long
 from scipy.optimize import fsolve
 
-# def param_grid_noInits(Dvals =np.arange(0,1.2,0.2), dvals=np.arange(0,4.5,0.5),
-#                        muvals=np.array([-2,-1,-0.5,-0.2,0,0.2]), betavals = np.arange(0,1.25,0.25)):
-#     Dmesh, dmesh, mumesh, betamesh = np.meshgrid(Dvals,dvals,muvals,betavals)
-#     Dvec,dvec,muvec,betavec = [np.ndarray.flatten(item) for item in [Dmesh, dmesh, mumesh, betamesh]]
-#     norms = scs.norm(muvec,1)
-#     Kvec = Kfun(dvec,norms)
-#     pcvec = pcfun(dvec,norms)
-#     Dvec,dvec,muvec,betavec, Kvec, pcvec = [np.repeat(item,10) for item in [Dvec,dvec,muvec,betavec, Kvec, pcvec]] # can later get rid of rows of nan's
-#     n = len(Dvec)
-
-#     data = {'mu':muvec,'K': Kvec, 'pc': pcvec,'d':dvec, 'D':Dvec, 'beta': betavec, 'u1eq': np.empty(n).fill(np.nan), 
-#             'u2eq':np.empty(n).fill(np.nan), 'bueq':np.empty(n).fill(np.nan)}
-#     df = pd.DataFrame(data = data)
-def get_param_grid(Dvals =np.arange(-2,1.2,0.2), dvals=np.arange(0.5,4.5,0.5), 
-                   muvals=np.array([-2,-1,-0.5,-0.2,0,0.2]), betavals = np.arange(0,1.25,0.25)):
+# Make the parameter mesh
+def get_param_grid(Dvals, svals,muvals, betavals):
     # gives parameter grids, with u1/u2 initials for the u2 side of the simplex (need to be reflected later)
     u1init = [0.05, 0.3,0.48, 0.08]
     u2init = [0.1,0.6,0.5,0.9]
@@ -32,9 +20,9 @@ def get_param_grid(Dvals =np.arange(-2,1.2,0.2), dvals=np.arange(0.5,4.5,0.5),
     which_rinit = [0,1,2,3,4,5,6,7]
 
     # make mesh
-    Dmesh, dmesh, betamesh, which_uinit_mesh, which_rinit_mesh, mumesh = np.meshgrid(Dvals,dvals,betavals,which_uinit, which_rinit,muvals)
+    Dmesh, smesh, betamesh, which_uinit_mesh, which_rinit_mesh, mumesh = np.meshgrid(Dvals,svals,betavals,which_uinit, which_rinit,muvals)
     # flatten
-    [Dvec,dvec,betavec,which_uinit_vec, which_rinit_vec, muvec] = [np.ndarray.flatten(item) for item in [Dmesh, dmesh, betamesh, which_uinit_mesh, which_rinit_mesh, mumesh]]
+    [Dvec,svec,betavec,which_uinit_vec, which_rinit_vec, muvec] = [np.ndarray.flatten(item) for item in [Dmesh, smesh, betamesh, which_uinit_mesh, which_rinit_mesh, mumesh]]
     # get rid of invalid 'rows' where bu is < 0
     u1vec = np.array([u1init[i] for i in which_uinit_vec])
     u2vec = np.array([u2init[i] for i in which_uinit_vec])
@@ -42,224 +30,44 @@ def get_param_grid(Dvals =np.arange(-2,1.2,0.2), dvals=np.arange(0.5,4.5,0.5),
     r1vec = np.array([r1init[i] for i in which_rinit_vec])
     r2vec = np.array([r2init[i] for i in which_rinit_vec])
     whichOK = buvec >=0
-    [Dvec,dvec,betavec,u1vec,u2vec, r1vec, r2vec, muvec] = [item[whichOK] for item in [Dvec,dvec,betavec,u1vec,u2vec,r1vec,r2vec, muvec]]
+    [Dvec,svec,betavec,u1vec,u2vec, r1vec, r2vec, muvec] = [item[whichOK] for item in [Dvec,svec,betavec,u1vec,u2vec,r1vec,r2vec, muvec]]
 
 
     norms = scs.norm(muvec,1)
-    Kvec = Kfun(dvec,norms)
-    pcvec = pcfun(dvec,norms)
+    Kvec = Kfun(svec,norms)
+    pcvec = pcfun(svec,norms)
     pwvec = 1 - Kvec - pcvec
     n = len(Dvec)
 
-    data = {'mu':muvec,'K': Kvec, 'pc': pcvec,'d':dvec, 'D':Dvec, 'beta': betavec, 'u1init': u1vec, 'u2init':u2vec, 
+    data = {'mu':muvec,'K': Kvec, 'pc': pcvec,'s':svec, 'D':Dvec, 'beta': betavec, 'u1init': u1vec, 'u2init':u2vec, 
             'buinit':buvec, 'r1init':r1vec, 'r2init':r2vec, 'u1eq': np.zeros(n), 'u2eq': np.zeros(n), 'bueq':np.zeros(n),
             'r1eq':np.zeros(n), 'r2eq':np.zeros(n), 'Weq': np.zeros(n), 'time': np.zeros(n), 'reached_eq': np.zeros(n),
            'URstable': np.zeros(n)}
     df = pd.DataFrame(data = data)
-    df = df.sort_values(by=['mu','beta','d','D'])
+    df = df.sort_values(by=['mu','beta','s','D'])
     df = df.reindex(np.arange(len(df.index)))
     return(df)
 
-# def param_grid_phase_plot(Dvals =np.arange(0,1.2,0.2), dvals=np.arange(0,4.5,0.5),
-#                           muvals=np.linspace(-0.2,0.2,3), betavals = np.arange(0,1.25,0.25), tsteps = 10, FineGrid = False):
-#     #sets up parameter grid for phase plot diagram
+# Iterate each initial point and parameter combination 50000 times.
+def get_1side_df(df):
+    #make sure indexed correctly
+    tsteps = 50000
+    result = GetXsteps(df, tsteps = tsteps)
+    umat, xmat, ymat, rmat, W = result
     
-#     if (FineGrid):
-#         u1init = np.linspace(0.0001,0.99999,20)
-#         u2init = np.linspace(0.0002,0.99998,20)
-#     else:
-#         u1init = np.linspace(0.01,0.98,10)
-#         u2init = np.linspace(0.02,0.99,10)
-        
-    
-#     r1init = [0.05,0.45,0.85,0.1,0.1,0.5,0.9,0.9] #each point's reflection accross the 45˚ line is included
-#     r2init = [0.1,0.5,0.9,0.9,0.05,0.45,0.85,0.1]
-#     which_rinit = [0,1,2,3,4,5,6,7]
-
-#     # make mesh
-#     Dmesh, dmesh, betamesh, u1mesh, u2mesh, which_rinit_mesh, mumesh = np.meshgrid(Dvals,dvals,betavals,u1init,u2init, which_rinit,muvals)
-#     # flatten
-#     [Dvec,dvec,betavec,u1vec,u2vec, which_rinit_vec, muvec] = [np.ndarray.flatten(item) for item in [Dmesh, dmesh, betamesh, u1mesh,
-#                                                                                                      u2mesh, which_rinit_mesh, mumesh]]
-#     r1vec = np.array([r1init[i] for i in which_rinit_vec])
-#     r2vec = np.array([r2init[i] for i in which_rinit_vec])
-    
-#     # get rid of invalid 'rows' where bu is < 0
-
-#     buvec = 1 - u1vec-u2vec
-
-#     whichOK = (buvec >=0)&(u2vec >= u1vec) # will have to reflect
-#     [Dvec,dvec,betavec,u1vec,u2vec, r1vec, r2vec, muvec] = [item[whichOK] for item in [Dvec,dvec,betavec,u1vec,u2vec,
-#                                                                                        r1vec,r2vec, muvec]]
-#     buvec = 1 - u1vec - u2vec
-#     #  learning parameters
-#     norms = scs.norm(muvec,1)
-#     Kvec = Kfun(dvec,norms)
-#     pcvec = pcfun(dvec,norms)
-    
-#     # oranize into df
-#     n = len(Kvec)
-#     data = {'mu':muvec,'K': Kvec, 'pc': pcvec,'d':dvec, 'D':Dvec, 'beta': betavec, 'u1init': u1vec, 'u2init':u2vec, 
-#             'buinit':buvec, 'r1init':r1vec, 'r2init':r2vec, 'u1_t': np.zeros(n), 'u2_t': np.zeros(n), 'bu_t':np.zeros(n),
-#             'r1_t':np.zeros(n), 'r2_t':np.zeros(n), 'W_t': np.zeros(n)}
-#     df = pd.DataFrame(data = data)
-#     df = df.sort_values(by=['mu','beta','d','D'])
-#     df.reset_index(inplace=True, drop=True)
-#     df['tsteps'] = 10
-#     return(df)
-
-# def df_Xsteps_parallelize(df):
-#     cores=mp.cpu_count()
-#     df_split = np.array_split(df, cores, axis=0)
-#     pool = Pool(cores)
-#     df_out = np.vstack(pool.map(fun, df_split))
-#     pool.close()
-#     pool.join()
-#     pool.clear()
-#     df_final = pd.DataFrame(df_out, columns = df.columns)
-#     return(df_final)
-
-
-# def df_Xsteps(df):
-#     # make df used for phase plot
-#     # fill in u1_t, u2_t, bu_t, r1_t, r2_t, W_t
-#     # should have already called df = param_grid_phase_plot(FineGrid = FineGrid)
-
-#     tsteps = df.tsteps.values[0] # since they're all the same
-#     result = GetXsteps(df, tsteps = tsteps)
-#     umat, xmat, ymat, rmat, W = result
-#     df.u1_t = umat[0]
-#     df.u2_t = umat[1]
-#     df.bu_t = umat[2]
-#     df.r1_t = rmat[0]
-#     df.r2_t = rmat[1]
-#     df.W_t = W
-    
-#     # check if r1 vals at eq
-#     df['r1_at_eq'] = np.equal(df.r1_t.values, 1 - df.beta.values*df.u1_t)
-#     df['r2_at_eq'] = np.equal(df.r1_t.values, 1 - df.beta.values*df.u2_t)
-    
-#     # check u1,u2, r1, r2 and parameters satisfy equilibrium equations
-#     df['shouldEqual0'] = Check_Eq_Equations(df) # fill in
-    
-#     return(df)
-
-
-def Check_Stable_D(row):
-# We have a bunch of points with C_D = 0. Check_Stable_D checks if they're actually stable
-
-    
-    # get vectors of post perturb values of all the frequencies
-    umat,ymat,rmat = Perturb(row)
-    umat = np.array(umat); ymat = np.array(ymat); rmat = np.array(rmat)
-    # check stability to increase in D
-    
-    dD =  0.01
-    n = len(umat[0]) 
-    y_pos_invades = False # default is that it is stable
-    if D <= 0.99:
-        for i in range(0,n):
-            result = NextGen(umat[:,i],[0,0,0],ymat[:,i],rmat[:,i], 
-                             row.D, row.K,row.pc,row.beta,
-                             deltas = [dD, 0, 0], eta=1)
-            yvec = result[2]
-            y = sum(yvec)
-            if y > 0.01: 
-                y_pos_invades = True
-                break
-    
-    dD = -0.01
-    y_neg_invades = False # default is that it is stable
-    #check stability to decrease in D
-    if D >= -1.99: # otherwise it's stable because D can't go down further
-        for i in range(0,n):
-            result = NextGen(umat[:,i],[0,0,0],ymat[:,i],rmat[:,i], 
-                             row.D, row.K,row.pc,row.beta,
-                             deltas = [dD, 0, 0], eta=1)
-            yvec = result[2]
-            y = sum(yvec)
-            if y > 0.01: 
-                y_neg_invades = True 
-                break
-    
-    row.loc['y_pos_invades'] = y_pos_invades
-    row.loc['y_neg_invades'] = y_neg_invades
-    return(row)
-def Perturb(row):
-# After the [u1,u2,bu,r1,r2] eq is perturbed with the addition of the a or b allele, get new frequencies    
-
-    # use dyvec here but dxvec could work too
-    uvec = [row.u1eq, row.u2eq, row.bueq]
-    rvec = [row.r1eq, row.r2eq]
-    # get new post-perturb vectors
-    
-    # no need to check if valid
-    dy = 0.01
-    dy1vec = np.array([0.05, 0.3,0.48, 0.08])*dy
-    dy2vec = np.array([0.1,0.6,0.5,0.9])*dy
-    dbyvec = dy - dy1vec - dy2vec
-    which_y = [0,1,2,3]
-    
-    #dr... prune r + dr values that are invalid
-    
-    dr1=0 #the default is not changing r1
-    if rvec[0]>0:
-        dr1 = np.array([-0.01,0.01])
-        check_r1 = (rvec[0] + dr1 > 0)&(rvec[0] + dr1 < 1)
-        dr1 = dr1[check_r1]
-    dr2 = 0
-    if rvec[1]>0:
-        dr2 = np.array([-0.01,0.01])
-        check_r2 = (rvec[1] + dr2 > 0) & (rvec[1] + dr2 < 1)
-        dr2 = dr2[check_r2]
-    
-    # du perturbations... look similar to x perturbs, but opposite direction
-    du = -dy
-    du1vec = np.array([0.015, 0.29,0.49, 0.07])*du
-    du2vec = np.array([0.11,0.49,0.51,0.89])*du
-    dbuvec = du - du1vec - du2vec
-    which_u = [0,1,2,3]
-    for i in which_u:
-        duvec = [du1vec[i],du2vec[i],dbuvec[i]]
-        [du1vec[i],du2vec[i],dbuvec[i]] = Perturb_EdgeCase(uvec,duvec)
-    
-    # now find all the combinations
-    which_y_mesh, which_u_mesh, DR1, DR2 = np.meshgrid(which_y, which_u, dr1, dr2)
-    [which_y, which_u, dr1, dr2] = [np.ndarray.flatten(item) for 
-                                    item in [which_y_mesh, which_u_mesh, DR1, DR2]]
-    y1 = dy1vec[which_y]; y2 = dy2vec[which_y]; by = dbyvec[which_y]
-    u1 = uvec[0] + du1vec[which_u]
-    u2 = uvec[1] + du2vec[which_u]
-    bu = uvec[2] + dbuvec[which_u]
-    r1 = rvec[0] + dr1
-    r2 = rvec[1] + dr2
+    #check_eq 
     
     
-    return([u1,u2,bu],[y1,y2,by],[r1,r2])
-def Perturb_EdgeCase(uvec,duvec):
-    #recursively checks for edge cases and adjusts duvec if needed
-    # CHECK it works
+    df.u1eq = umat[0]
+    df.u2eq = umat[1]
+    df.bueq = umat[2]
+    df.r1eq = rmat[0]
+    df.r2eq = rmat[1]
+    df.Weq = W
+    df.time = tsteps
+    return(df)
     
-    # make sure using numpy arrays
-    du = sum(duvec)
-    uvec = np.array(uvec); duvec = np.array(duvec);
-    # find indices of edge cases
-    edge_bool = uvec + duvec <= 0
-    
-    n = sum(edge_bool)
-    if n>0:
-        duvec[edge_bool] = -uvec[edge_bool] +0.00001 # so not at exactly 0
-        du_remain = du - sum(duvec)
-        duvec[~edge_bool] = duvec[~edge_bool] + (1/np.float(3-n))*du_remain
-        
-        # make sure that we didn't cause a different frequency to be negative:
-        return(Perturb_EdgeCase(uvec,duvec))
-
-    else:
-        return(duvec)
-    
-
-          
+# Given a parameter mesh (param_grid) and tsteps, iterates each row for "tsteps" time stpes
 def GetXsteps(param_grid, tsteps):
         
     u1init = param_grid.u1init.values
@@ -279,56 +87,62 @@ def GetXsteps(param_grid, tsteps):
     rvec = [r1init, r2init]
     
     for i in range(0,tsteps):
-        result = NextGen(uvec,xvec,yvec,rvec, Dvec, Kvec,pcvec ,beta = betavec)
+        result = NextGen(uvec,xvec,yvec,rvec, Dvec, Kvec,pcvec ,betavec)
         uvec, xvec, yvec, rvec, W = result
     return(result)
 
-def GetEq_DF(row, retry = 0, tsteps = 50000, dxy = 0):
-    # if if_perturb = True, should only be given dataframe which is unstable in direction being perturbed
-    #assign vals to uv, rv, etc
-    #print(row.u1init)
-    if dxy > 0:
-        tsteps = 50000
-        deltas = [row.dD, row.dk, row.dpc]
-        du1 = 0.3*dxy; du2 = 0.41*dxy; dbu = 0.29*dxy
-        
-        uv = np.array([row.u1eq - du1, row.u2eq - du2, row.bueq - dbu])
-        xvec = [row.dx1, row.dx2, row.dbx]
-        yvec = [row.dy1, row.dy2, row.dby]
-        rv = [row.r1eq, row.r2eq]
-        Dval = row.D; Kval = row.K; pcval = row.pc; betaval = row.beta
-        ans = FindEquilibrium(uv,xvec,yvec,rv,Kval,pcval,Dval,tsteps, deltas,betaval)
-        uvec,xvec,yvec,rvec,Wcurr,t,reached_eq = ans
-        [row.u1eq2, row.u2eq2, row.bueq2] = uvec
-        [row.x1eq, row.x2eq, row.bxeq] = xvec
-        [row.y1eq, row.y2eq, row.byeq] = yvec
-        [row.r1eq2, row.r2eq2] = rvec
-        row.Weq2 = Wcurr
-        row.time2 = t
-        row.reached_eq2 = reached_eq
+# Uses fsolve from scipy.optimize on rows that are taking more than 50000 iterations to reach an equilibrium.
+def fsolve_failed_eq(df_fail):
+    # take rows that failed to reach equilibrium, use their final states and plug in as initials to fsolve
+    def EqSystem(freqs, params):
+        [u1,u2,bu,r1,r2, W] = freqs
+        K,pc,D,beta = params
+        uvec = [u1,u2,bu]; xvec = [0,0,0]; yvec = [0,0,0]; rvec = [r1,r2]
+        uvec, xvec, yvec, rvec,W = NextGen(uvec,xvec,yvec,rvec, D, K,pc,beta = beta)
+        return_vec = np.array(freqs) - np.array([*uvec,*rvec,W])
+        # return_vec of [Wu1 - Wu1func, ... r1 - r1fun, r2 - r2fun]
+        return(return_vec)
+    def fsolve_rows(row):
+        freqs = [row.u1eq, row.u2eq, row.bueq, row.r1eq, row.r2eq, row.Weq]
+        params = [row.K, row.pc, row.D, row.beta]
+        res, infodict, ier,mesg = fsolve(EqSystem, freqs, args=params, full_output=True, xtol = 1e-10)
+        row.u1eq, row.u2eq, row.bueq, row.r1eq, row.r2eq, row.Weq = res
+        row.reached_eq = ier
+        row.time = -1
         return(row)
-    else:
-        if retry ==0:
-            uv = [row.u1init, row.u2init, row.buinit]
-            rv = [row.r1init, row.r2init]
-            tsteps_0 = 0
-        else:
-            uv = [row.u1eq, row.u2eq, row.bueq]
-            rv = [row.r1eq, row.r2eq]
-            tsteps_0 = row.time
-        xvec = yvec = deltas = [0,0,0]
-        
-        Dval = row.D; Kval = row.K; pcval = row.pc; betaval = row.beta
-        # num steps to iterate over to find equilibrium
-        ans = FindEquilibrium(uv,xvec,yvec,rv,Kval,pcval,Dval,tsteps, deltas,betaval)
-        uvec_eq, xvec, yvec, rvec_eq, Weq, t, reached_eq = ans
-        [row.u1eq, row.u2eq, row.bueq] = uvec_eq
-        [row.r1eq, row.r2eq] = rvec_eq
-        row.Weq = Weq 
-        row.time = t + tsteps_0 
-        row.reached_eq = reached_eq
-        return(row)
+    new_eq = df_fail.apply(lambda row: fsolve_rows(row), axis = 1)
+    # now check these eq... FILL IN
+    return(new_eq)
+
+# The system is symmetric over the u1 = u2 line. 
+# This function reflects over that line as explained in Numerical Analysis and Eqs. 24-25
+def reflect_df(df):
+    df2 = df.copy()
+    df2.u2init = df.u1init
+    df2.u1init = df.u2init
+    df2.r1init = df.r2init
+    df2.r2init = df.r1init
+    df2.u1eq = df.u2eq
+    df2.u2eq = df.u1eq
+    df2.r1eq = df.r2eq
+    df2.r2eq = df.r1eq
     
+    df = df.append(df2)
+    return(df)
+
+# extract the unique equilibria, since manyy initial points will have iterated to the same equilibrium.
+def get_UniqueEquilibria(df,if_save=False):
+    df_eq = df.round(6)[(df.reached_eq==1)].groupby(['K','pc','s','mu','D','beta','u1eq','u2eq','bueq',
+                                                     'r1eq','r2eq','Weq','URstable'], as_index = False)
+    df_eq = df_eq['u2init'].count()
+    df_eq.rename(columns={'u2init':'NumInitials'}, inplace=True)
+    # df_eq.reset_index(inplace=True, drop=True)
+    df_eq = df_eq.apply(lambda row: JstarStable(row), axis = 1)
+    df_eq = get_gradients(df_eq)
+    if if_save:
+        df_eq.to_csv('UniqueEquilibria.csv', index = False)
+    return(df_eq)
+# Check internal stability for each row
 def JstarStable(row):
     # Checks Jstar stability... 1 if stable, 0 if not, -1 if leading eval is 1 (or -1)
     # adds in the absolute value of leading eigenvalue
@@ -352,50 +166,28 @@ def JstarStable(row):
         row.URstable = -1.0
     else:
         row.URstable = 0.0
-    return(row)    
-def get_1side_df(df):
-    #make sure indexed correctly
-    tsteps = 50000
-    result = GetXsteps(df, tsteps = 50000)
-    umat, xmat, ymat, rmat, W = result
-    
-    #check_eq 
-    
-    
-    df.u1eq = umat[0]
-    df.u2eq = umat[1]
-    df.bueq = umat[2]
-    df.r1eq = rmat[0]
-    df.r2eq = rmat[1]
-    df.Weq = W
-    df.time = 50000
-    return(df)
-    
-    
-def reflect_df(df):
-    u1init = df.u1init
-    u2init = df.u2init
-    r1init = df.r1init
-    r2init = df.r2init
-    u1eq = df.u1eq
-    u2eq = df.u2eq
-    r1eq = df.r1eq
-    r2eq = df.r2eq
-    df2 = df.copy()
-    df2.u2init = u1init
-    df2.u1init = u2init
-    df2.r1init = r2init
-    df2.r2init = r1init
-    df2.u1eq = u2eq
-    df2.u2eq = u1eq
-    df2.r1eq = r2eq
-    df2.r2eq = r1eq
-    
-    df = df.append(df2)
-    return(df)
-    #add in 500 at a time, updating the file
-    # print where you're at each time
-    #after loop, check how many rows remain
+    return(row)
+
+# Check external stability by finding C_s and C_D
+def get_gradients(df):
+    df_use = df.copy()
+    u1vec = df_use.u1eq
+    u2vec = df_use.u2eq
+    r1vec = df_use.r1eq
+    r2vec = df_use.r2eq
+    Wvec = df_use.Weq
+    Kvec = df_use.K
+    Dvec = df_use.D
+    svec = df_use.s
+    muvec = df_use.mu
+    Csvec = [Grad_s([u1,u2], [r1,r2], W, D, s, mu) for u1,
+             u2,r1,r2,W,D,s,mu in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Dvec,svec,muvec)]
+    CDvec = [Grad_D([u1,u2], [r1,r2], W, K,D) for u1,u2,r1,r2,W,K,D in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Kvec,Dvec)]
+    df_use['C_s'] = Csvec
+    df_use['C_D'] = CDvec
+    return(df_use)
+
+
 
 def reflect_df_Xsteps(df):
     u1init = df.u1init
@@ -524,7 +316,7 @@ def retry_findeq(df):
     return(df)
 
 def get_UniqueEquilibria(df,if_save=False):
-    df_eq = df.round(6)[(df.reached_eq==1)].groupby(['K','pc','d','mu','D','beta','u1eq','u2eq','bueq',
+    df_eq = df.round(6)[(df.reached_eq==1)].groupby(['K','pc','s','mu','D','beta','u1eq','u2eq','bueq',
                                                      'r1eq','r2eq','Weq','URstable'], as_index = False)
     df_eq = df_eq['u2init'].count()
     df_eq.rename(columns={'u2init':'NumInitials'}, inplace=True)
@@ -543,20 +335,20 @@ def get_gradients(df):
     Wvec = df_use.Weq
     Kvec = df_use.K
     Dvec = df_use.D
-    dvec = df_use.d
+    svec = df_use.s
     muvec = df_use.mu
-    Cdvec = [Grad_d([u1,u2], [r1,r2], W, D, d, mu) for u1,
-             u2,r1,r2,W,D,d,mu in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Dvec,dvec,muvec)]
+    Csvec = [Grad_s([u1,u2], [r1,r2], W, D, s, mu) for u1,
+             u2,r1,r2,W,D,s,mu in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Dvec,svec,muvec)]
     CDvec = [Grad_D([u1,u2], [r1,r2], W, K,D) for u1,u2,r1,r2,W,K,D in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Kvec,Dvec)]
-    df_use['C_d'] = Cdvec
+    df_use['C_s'] = Csvec
     df_use['C_D'] = CDvec
     return(df_use)
 
 def get_lambdas(row, dmat, mumu, dk_pos, dk_neg, dpc_pos, dpc_neg):
-    d = row.d
+    s = row.s
     mu = row.mu
     ind_row = np.where(mumu==mu)[0][0]
-    ind_col = np.where(dmat==d)[1][0]
+    ind_col = np.where(smat==s)[1][0]
     dk_pos = dk_pos[ind_row,ind_col]
     dk_neg = dk_neg[ind_row,ind_col]
     dpc_pos = dpc_pos[ind_row,ind_col]
@@ -575,27 +367,6 @@ def fill_in_noneq(df):
     df = df[df.reached_eq==1].append(df_fail_try2)
     return(df)
 
-def fsolve_failed_eq(df_fail):
-    # take rows that failed to reach equilibrium, use their final states and plug in as initials to fsolve
-    def EqSystem(freqs, params):
-        [u1,u2,bu,r1,r2, W] = freqs
-        K,pc,D,beta = params
-        uvec = [u1,u2,bu]; xvec = [0,0,0]; yvec = [0,0,0]; rvec = [r1,r2]
-        uvec, xvec, yvec, rvec,W = NextGen(uvec,xvec,yvec,rvec, D, K,pc,beta = beta)
-        return_vec = np.array(freqs) - np.array([*uvec,*rvec,W])
-        # return_vec of [Wu1 - Wu1func, ... r1 - r1fun, r2 - r2fun]
-        return(return_vec)
-    def fsolve_rows(row):
-        freqs = [row.u1eq, row.u2eq, row.bueq, row.r1eq, row.r2eq, row.Weq]
-        params = [row.K, row.pc, row.D, row.beta]
-        res, infodict, ier,mesg = fsolve(EqSystem, freqs, args=params, full_output=True, xtol = 1e-10)
-        row.u1eq, row.u2eq, row.bueq, row.r1eq, row.r2eq, row.Weq = res
-        row.reached_eq = ier
-        row.time = -1
-        return(row)
-    new_eq = df_fail.apply(lambda row: fsolve_rows(row), axis = 1)
-    # now check these eq... FILL IN
-    return(new_eq)
 
 def IterateCheck_UR_Stable(row):
     # takes row from df of unique eq
