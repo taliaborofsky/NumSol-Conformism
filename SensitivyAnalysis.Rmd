@@ -21,29 +21,6 @@ library(zeallot)
 library(ROSE) # for roc curve
 library(RVAideMemoire) # library that has spearman.ci function...gets confidence intervals on spearman using bootstrap
 
-caption_at_bottom <- function(x,fn ) {
-  # x is output from stargazer, fn is filename
-  cap <- grep("\\\\caption", x)
-  lab <- grep("\\\\label", x)
-  last <- grep("\\\\end\\{table", x)
-  cat(
-    paste(
-      c(x[-last], x[cap], x[lab], x[last])[-c(cap, lab)]
-    , collapse = "\n")
-  , "\n", file = fn, append = TRUE)
-}
-p_lratiotest <- function(mylogit){
-  result <- with(mylogit, pchisq(null.deviance - deviance, df.null - df.residual, lower.tail = FALSE))
-  return(result)
-}
-classification_table <- function(mod,Y){
-  
-  Yhat <- fitted(mod)
-  thresh <- 0.5
-  YhatFac <- cut(Yhat, breaks = c(-Inf, thresh, Inf), labels = c("FALSE", "TRUE"))
-  cTab <- table(Y, YhatFac)
-  addmargins(cTab)
-}
 ```
 
 # K > 1/2, D = 0, unequal equilibrium
@@ -51,21 +28,16 @@ $$
 \text{sign}(C_D) = \text{sign} \left( \frac{2K-1}{K} -3 \left(u_1^2 + \left( \frac{2K-1}{K} - u1 \right)^2 \right)+2 \left(u_1^3 + \left( \frac{2K-1}{K} - u1 \right)^3 \right)\right)
 $$
 
+Figure 3:
 
 ```{r}
-K<-seq(1/2,0.99,length=1000)
-u<-seq(0,1,length=1000)
-z<-outer(K,u,function(K,u) (2*K-1)/K -3*u^2 -3*((2*K-1)/K -u)^2 + 2*u^3 + 2*((2*K-1)/K -u)^3)
-require(genridge)
-filled.contour(K,u,z, levels = c(-1000,0,1000), col = c("blue","white"), xlab = "K",ylab = TeX("$u_1$"))
-
 
 grid <- expand.grid(K = seq(1/2,0.99,length.out=1000),u = seq(0,1,length.out=1000))
 f <- function(K,u) (2*K-1)/K -3*u^2 -3*((2*K-1)/K -u)^2 + 2*u^3 + 2*((2*K-1)/K -u)^3
 f2 <- function(K,u) (2*K-1)/K - u
 grid$filled <- (f(grid$K,grid$u)>=0) 
 grid$filled[(f2(grid$K,grid$u)<0)|(f2(grid$K,grid$u)>1)] = NA
-p<- ggplot(grid) + geom_tile(aes(x=K,y=u,fill=filled))  + theme_classic() + labs(x=TeX("$K$"),y = TeX("$u_1$"))+ theme(legend.position = "none") + scale_fill_brewer(palette="Set1", na.value="white")
+p<- ggplot(grid) + geom_tile(aes(x=K,y=u,fill=filled))  + theme_classic() + labs(x=TeX("$K$"),y = TeX("$\\hat{u_1}$"))+ theme(legend.position = "none") + scale_fill_brewer(palette="Set1", na.value="white") + theme(text = element_text(size = 20)) 
 
 p
 ggsave("D0Unequal_C_D.png", plot = p)
@@ -574,7 +546,7 @@ To-do: Do D < 0 and D > 0 separately
 library(ggplot2)
 library(ggtern)
 library(latex2exp)
-
+library("viridis")
 
 datUse = eqDataPos
 
@@ -582,14 +554,14 @@ head(datUse)
 
 # C_s
 
-plotC_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = x_pos_invades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotC_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = x_pos_invades), size = 5, alpha = 0.8, shape = 1) + theme_bw()
 plotC_s <- plotC_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"),color = TeX("$C_s > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))  + theme(text = element_text(size = 18))
 plotC_s
 ggsave("Figures/ternaryAll_C_s.png", plot = plotC_s)
 
 #C_D
 
-plotC_D <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = y_pos_invades), size = 5, alpha = 0.5, shape = 1) + theme_bw()
+plotC_D <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = y_pos_invades), size = 5, alpha = 0.8, shape = 1) + theme_bw()
 plotC_D <- plotC_D + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), color = TeX("$C_D > 0$")) +theme_legend_position(x = "topleft")  + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
 plotC_D
 ggsave("Figures/ternaryAll_C_D.png", plot = plotC_D)
@@ -605,27 +577,32 @@ ggsave("Figures/ternaryAll_C_D.png", plot = plotC_D)
 library(ggplot2)
 library(ggtern)
 library(latex2exp)
-
+library("viridis")
+library("ggsci")
 
 datUse = eqDataPos
-plotD <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = D), size = 5, alpha = 0.5, shape = 1) + theme_bw()
-plotD <- plotD + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
+
+cols = viridis(6)
+plotD <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = D), size = 5, shape = 1) + theme_bw()
+plotD <- plotD + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = "D") +theme_legend_position(x = "topleft") + scale_color_viridis() + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
 plotD
 ggsave("Figures/ternaryAll_bigD.png", plot = plotD)
 
-plotMU <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = mu), size = 3, alpha = 0.5, shape = 1) + theme_bw()
-plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
-plotMU
+cols = viridis(7)
+plotMU <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = mu), size = 3,  shape = 1) + theme_bw()
+plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18)) 
+plotMU + scale_color_viridis() #scale_colour_manual(values = cols) #scale_color_brewer(palette="viridis") #+ scale_colour_manual(values = c("darkred","red","orange","yellow", "green","blue","darkblue"))
 ggsave("Figures/ternaryAllMU.png", plot = plotMU)
 
-plotd <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = K), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotd <- plotd + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), legend = 'd') +theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
+plot_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), size = 3, shape = 1) + theme_bw()
+plot_s <- plot_s + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = 's') +theme_legend_position(x = "topleft") + scale_color_viridis() + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
 
-plotd
-ggsave("Figures/ternaryAll_K.png", plot = plotd)
+plot_s
+ggsave("Figures/ternaryAll_K.png", plot = plot_s)
 
-plotBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = beta), alpha = 0.5, size = 3, shape = 1) + theme_bw()
-plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_colour_binned(low='blue', high = 'red') + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
+cols = viridis(5)
+plotBeta <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = beta), size = 3, shape = 1) + theme_bw()
+plotBeta <- plotBeta + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\beta$")) + theme_legend_position(x = "topleft") + scale_color_viridis() + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18))
 plotBeta
 ggsave("Figures/ternaryAllbeta.png", plot = plotBeta)
 
