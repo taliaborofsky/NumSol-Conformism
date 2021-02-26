@@ -54,7 +54,7 @@ def get_param_grid(Dvals, svals,muvals, betavals):
 # Iterate each initial point and parameter combination 50000 times.
 def get_1side_df(df):
     #make sure indexed correctly
-    tsteps = 500000
+    tsteps = 200000
     result = GetXsteps(df, tsteps = tsteps)
     umat, xmat, ymat, rmat, W = result
     
