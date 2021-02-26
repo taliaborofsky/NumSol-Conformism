@@ -46,12 +46,15 @@ def get_param_grid(Dvals, svals,muvals, betavals):
     df = pd.DataFrame(data = data)
     df = df.sort_values(by=['mu','beta','s','D'])
     df = df.reindex(np.arange(len(df.index)))
+    
+    
+    
     return(df)
 
 # Iterate each initial point and parameter combination 50000 times.
 def get_1side_df(df):
     #make sure indexed correctly
-    tsteps = 50000
+    tsteps = 500000
     result = GetXsteps(df, tsteps = tsteps)
     umat, xmat, ymat, rmat, W = result
     
@@ -316,6 +319,7 @@ def retry_findeq(df):
     return(df)
 
 def get_UniqueEquilibria(df,if_save=False):
+    
     df_eq = df.round(6)[(df.reached_eq==1)].groupby(['K','pc','s','mu','D','beta','u1eq','u2eq','bueq',
                                                      'r1eq','r2eq','Weq','URstable'], as_index = False)
     df_eq = df_eq['u2init'].count()
