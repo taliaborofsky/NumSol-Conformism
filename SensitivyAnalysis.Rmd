@@ -6,7 +6,12 @@ output:
   html_document: default
   pdf_document: default
 ---
-
+TO-DO: 
+- Rerun, noting that if sign(C_s) < 0 when K = 0, this does not mean decreased social learning invades
+- Why was C_s actually negative in those 16 places?
+- Why did I know they're actually stable for this line: "fix equilibria in which lambdastar = 1 but actually internally stable"?
+    Why are equilibria for the mask (beta==0)&(D==0)&(pc==0)&(K>0) actually stable?
+    If we iterated to the equilibria then they're stable. But what if we didn't iterate to the equilibrium?
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(stargazer)
@@ -56,9 +61,7 @@ uniqueEquilibria <- read.csv('UniqueEquilibriaDF.csv', as.is=TRUE)
 # helped to round D values
 uniqueEquilibria$D <-round(uniqueEquilibria$D,digits = 10)
 
-# setting up the columns that indicate whether more/less social learning evolves, more/less conformity evolves
-uniqueEquilibria$x_pos_invades <- uniqueEquilibria$C_s > 0
-uniqueEquilibria$x_neg_invades <- uniqueEquilibria$C_s < 0
+# Adjusting bool strings to actual R bool values
 uniqueEquilibria[uniqueEquilibria=="True"]=TRUE
 uniqueEquilibria[uniqueEquilibria=="False"]=FALSE
 ### deal with equilibria for which lambda* = 1
@@ -66,13 +69,6 @@ uniqueEquilibria[uniqueEquilibria=="False"]=FALSE
 # rename and do rest of changes to eqData
 eqData <- uniqueEquilibria
 
-# I need to check on calculating C_s
-fs <- function(s,mu) dnorm(s,mean=mu,sd=1)
-fms <- function(s,mu) dnorm(-s,mean=mu,sd=1)
-phifun<-function(u) u*(1-u)*(2*u-1)
-get_C_s <- function(s,mu,W,D,u1,u2,r1,r2) (1/W)*(-fs(s,mu) + (fs(s,mu)+fms(s,mu))*(r1*(u1 + D*phifun(u1)) + r2*(u2+D*phifun(u2)) ) )
-C_s = get_C_s(eqData$s, eqData$mu, eqData$W, eqData$D, eqData$u1eq, eqData$u2eq, eqData$r1eq, eqData$r2eq)
-eqData$C_s = C_s
 
 # remove the small very s, D values
 eqData <- eqData %>% filter(s != 0.01) %>% filter(D != -0.01) %>% filter(D!=0.01)
@@ -88,16 +84,21 @@ detach(eqData)
 # only use equilibria that are internally stable
 eqData <- eqData %>% filter(URstable == 1)
 
-# If C_s is negative when K = 0, then set it to 0
-eqData[(eqData$K==0)&(eqData$C_s<0),]$C_s = 0
+# # If C_s is negative when K = 0, then set it to 0
+#eqData[(eqData$K==0)&(eqData$C_s<0),]$C_s = 0
 
 # label by whether Increased Social Leanring Invades, Decreased invades, or stable
 eqData$signC_s <- factor(sign(eqData$C_s))
+
 # thre are about 16 places where r says C_s = 0 but it's actually negative
 eqData$signC_s[eqData$signC_s==0] = -1
 
-eqData$signC_D <- factor(eqData$C_D)
+# Anotehr way to label that's helpful for certain code:
+eqData$x_pos_invades <- eqData$
+uniqueEquilibria$x_pos_invades <- uniqueEquilibria$C_s > 0
+uniqueEquilibria$x_neg_invades <- uniqueEquilibria$C_s < 0
 
+eqData$signC_D <- factor(sign(eqData$C_D))
 
 # add column for learning success 
 
@@ -483,8 +484,8 @@ HOWEVER, these logistic regressions are terrible. I'll have to do the violin plo
 ```{r}
 
 #maxs$Tukey = c('a','b','c')
-
-p.b <- ggplot(data=eqData, aes(x=signC_s,y=beta,fill=isDiff))+geom_boxplot(adjust=1, scale = "count") + theme_classic() + labs(x=TeX("$sign(C_s)$"), y = TeX("$\\beta$"),fontsize=20)+ theme(text = element_text(size = 20))  #+ geom_text(data=maxs,aes(label=Tukey))
+eqData$isDiff = eqData$difference>0
+p.b <- ggplot(data=eqData, aes(x=factor(x_pos_invades),y=beta,fill=isDiff))+geom_boxplot(adjust=1, scale = "count") + theme_classic() + labs(x="Increased Social Learning Invades", y = TeX("$\\beta$"),fontsize=20)+ theme(text = element_text(size = 20),axis.title.x = element_text(vjust=-0.8))  #+ geom_text(data=maxs,aes(label=Tukey))
 
 p.b <- p.b + scale_fill_discrete(name = "Behavioral Preference", labels = c("no behavioral preference","positive behavioral preference"))
 p.b
@@ -497,7 +498,24 @@ summary(aov1)
 TukeyHSD(aov1)
 ```
 
+```{r stats for figs 9,10}
+attach(eqDataPos)
+isDiff = difference>0
+colnames(eqDataPos)
+dat = eqDataPos %>% filter(difference>0)
+mod <- aov(dat$beta ~ factor(dat$y_pos_invades))
+summary(mod)
+TukeyHSD(mod)
 
+modsoc <- aov(data=eqDataPos, beta ~ factor(x_pos_invades))
+summary(modsoc)
+TukeyHSD(modsoc)
+aov1 <- aov(beta~ factor(isDiff), subset=signC_s==1)
+summary(aov1)
+TukeyHSD(aov1)
+
+
+```
 
 ```{r}
 
@@ -591,7 +609,8 @@ ggsave("Figures/ternaryAll_bigD.png", plot = plotD)
 cols = viridis(7)
 plotMU <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1)) + geom_point(aes(colour = mu), size = 3,  shape = 1) + theme_bw()
 plotMU <- plotMU + tern_limits(labels=c(0,0.2, 0.4, 0.6, 0.8, 1)) + labs(x = TeX("$u_1$"), y = TeX("$u_2$"), z = TeX("$\\bar{u}$"), colour = TeX("$\\mu$")) +theme_legend_position(x = "topleft") + theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+ theme(text = element_text(size = 18)) 
-plotMU + scale_color_viridis() #scale_colour_manual(values = cols) #scale_color_brewer(palette="viridis") #+ scale_colour_manual(values = c("darkred","red","orange","yellow", "green","blue","darkblue"))
+plotMU <- plotMU + scale_color_viridis() #scale_colour_manual(values = cols) #scale_color_brewer(palette="viridis") #+ scale_colour_manual(values = c("darkred","red","orange","yellow", "green","blue","darkblue"))
+plotMU
 ggsave("Figures/ternaryAllMU.png", plot = plotMU)
 
 plot_s <- ggplot(data = datUse, mapping = aes(x = u1eq, y = u2eq, z = bueq)) + coord_tern(Tlim=c(0,1),Llim=c(0,1),Rlim=c(0,1))+ geom_point(aes(colour = s), size = 3, shape = 1) + theme_bw()
