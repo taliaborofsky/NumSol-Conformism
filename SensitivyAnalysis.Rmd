@@ -49,7 +49,7 @@ ggsave("D0Unequal_C_D.png", plot = p)
 #red means C_D < 0, turquoise means C_D > 0
 ```
 
-
+Load dataframe and make adjustments so it is easier to work with
 ```{r dframes, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
@@ -70,38 +70,46 @@ uniqueEquilibria[uniqueEquilibria=="False"]=FALSE
 eqData <- uniqueEquilibria
 
 
-# remove the small very s, D values
-eqData <- eqData %>% filter(s != 0.01) %>% filter(D != -0.01) %>% filter(D!=0.01)
-
-# remove values where s = 0 and D > 0
+# remove values where s = 0 and D != 0 because we assume an organism can't have the conformist transmission bias trait 
+# without being able to leran socially
 eqData <- eqData %>% filter(!(s==0&D!=0))
 
-# fix equilibria in which lambdastar = 1 but actually internally stable
-attach(eqData)
-mask =(beta==0)&(D==0)&(pc==0)&(K>0) # this equilibria might have lambda* = 1, but is actually internally stable
-eqData[mask,]$URstable = 1
-detach(eqData)
-# only use equilibria that are internally stable
-eqData <- eqData %>% filter(URstable == 1)
+# below was in the code for the first draft but we have since determined that it's unnecessary and 
+# can actually erroneously set cases where beta = 0, D = 0, pc = 0, and K>1/2 as stable
+  # # fix equilibria in which lambdastar = 1 but actually internally stable
+  # attach(eqData)
+  # mask =(beta==0)&(D==0)&(pc==0)&(K>0) # this equilibria might have lambda* = 1, but is actually internally stable
+  # eqData[mask,]$URstable = 1
+  # detach(eqData)
 
-# # If C_s is negative when K = 0, then set it to 0
-#eqData[(eqData$K==0)&(eqData$C_s<0),]$C_s = 0
 
-# label by whether Increased Social Leanring Invades, Decreased invades, or stable
+  # only use equilibria that are internally stable
+  # no longer necessary because I'm only using equilibria that were arrived at through iteration: eqData <- eqData %>% filter(URstable == 1)
+
+# # (NO LONGER NECESSARY)If C_s is negative when K = 0, then set it to 0
+  #eqData[(eqData$K==0)&(eqData$C_s<0),]$C_s = 0
+
+# label by the sign of C_s
 eqData$signC_s <- factor(sign(eqData$C_s))
 
-# thre are about 16 places where r says C_s = 0 but it's actually negative
-eqData$signC_s[eqData$signC_s==0] = -1
+# (Fixed. NO LONGER NECESSARY) thre are about 16 places where r says C_s = 0 but it's actually negative
+  # eqData$signC_s[eqData$signC_s==0] = -1
 
-# Anotehr way to label that's helpful for certain code:
-eqData$x_pos_invades <- eqData$
-uniqueEquilibria$x_pos_invades <- uniqueEquilibria$C_s > 0
-uniqueEquilibria$x_neg_invades <- uniqueEquilibria$C_s < 0
-
+# label by the sign of C_D
 eqData$signC_D <- factor(sign(eqData$C_D))
 
-# add column for learning success 
+# label by type of invasion that can happen
+eqData$a_stability <- "stable"
+eqData$a_stability[eqData$x_pos_invades==TRUE] <- "positive"
+eqData$a_stability[eqData$x_neg_invades==TRUE] <- "negative"
+eqData$a_stability <- factor(eqData$a_stability)
 
+eqData$b_stability <- "stable"
+eqData$b_stability[eqData$y_pos_invades==TRUE] <- "positive"
+eqData$b_stability[eqData$y_neg_invades==TRUE] <- "negative"
+eqData$b_stability <- factor(eqData$b_stability)
+
+# add column for learning success 
 eqData$learningSuccess = eqData$u1eq + eqData$u2eq # portion of foragers that learn how to find food
 
 
@@ -110,7 +118,7 @@ eqDataPos = eqData %>% filter(D>=0)
 eqDataPos_UnEqual <-  eqDataPos %>% filter(difference > 0)
 eqDataPos_Equal = eqDataPos %>% filter(difference==0)
 # D < 0
-eqDataNeg = eqData %>% filter(D<=0)
+eqDataNeg = eqData %>% filter(D<0)
 eqDataNeg_UnEqual = eqDataNeg %>% filter(difference>0)
 eqDataNeg_Equal = eqDataNeg %>% filter(difference==0)
 
