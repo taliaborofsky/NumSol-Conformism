@@ -100,7 +100,10 @@ def fsolve_failed_eq(df_fail):
     def EqSystem(freqs, params):
         [u1,u2,bu,r1,r2, W] = freqs
         K,pc,D,beta = params
-        uvec = [u1,u2,bu]; xvec = [0,0,0]; yvec = [0,0,0]; rvec = [r1,r2]
+        uvec = [u1,u2,bu]; 
+        xvec = [0,0,0]; 
+        yvec = [0,0,0]; 
+        rvec = [r1,r2]
         uvec, xvec, yvec, rvec,W = NextGen(uvec,xvec,yvec,rvec, D, K,pc,beta = beta)
         return_vec = np.array(freqs) - np.array([*uvec,*rvec,W])
         # return_vec of [Wu1 - Wu1func, ... r1 - r1fun, r2 - r2fun]
