@@ -13,19 +13,19 @@ def Kfun(s, norm = scs.norm(0.2,1)):
     K = norm.cdf(s) - norm.cdf(-s)
     return(K)
 # find pc given s and the normal curve
-def pcfun(d, norm = scs.norm(0.2,1)):
+def pcfun(s, norm = scs.norm(0.2,1)):
     # Finds pc, the probability of individual learning correctly
     #input: d real positive numbe or -1, and a normmal curve
     #output pc
-    pc = 1 - norm.cdf(d)
+    pc = 1 - norm.cdf(s)
     return(pc)
 
 # find pw given s and the normal curve
-def pwfun(d,norm = scs.norm(0.2,1)):
+def pwfun(s,norm = scs.norm(0.2,1)):
     # Finds pw, the probability of individual learning incorrectly
     #input: d real positive numbe or -1, and a normmal curve
     #output pw
-    pw = norm.cdf(-d)
+    pw = norm.cdf(-s)
     return(pw)
 
 # find phi(p_i)
@@ -66,9 +66,10 @@ def NextGen(uvec,xvec,yvec,rvec, D, K,pc,beta,deltas = [0, 0, 0], eta=1):
     u = sum(uvec)
     x = sum(xvec)
     y = sum(yvec)
-    n = len(uvec)
+
     p1 = uvec[0] + xvec[0] + yvec[0]
     p2 = uvec[1] + xvec[1] + yvec[1]
+    
     Wu1 = Wv_fun(p1,u,rvec[0],D,K,pc)
     Wu2 = Wv_fun(p2,u,rvec[1],D,K,pc)
     Wbu = Wvbar_fun(p1,p2,u,D,K,pc)
@@ -76,6 +77,7 @@ def NextGen(uvec,xvec,yvec,rvec, D, K,pc,beta,deltas = [0, 0, 0], eta=1):
     Wx1 = Wv_fun(p1,x,rvec[0],D,K_x,pc_x)
     Wx2 = Wv_fun(p2,x,rvec[1],D,K_x,pc_x)
     Wbx = Wvbar_fun(p1,p2,x,D,K_x,pc_x)
+    
     Wy1 = Wv_fun(p1,y,rvec[0],D_y,K,pc)
     Wy2 = Wv_fun(p2,y,rvec[1],D_y,K,pc)
     Wby = Wvbar_fun(p1,p2,y,D_y,K,pc)

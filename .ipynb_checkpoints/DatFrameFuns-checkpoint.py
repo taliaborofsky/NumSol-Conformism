@@ -100,7 +100,10 @@ def fsolve_failed_eq(df_fail):
     def EqSystem(freqs, params):
         [u1,u2,bu,r1,r2, W] = freqs
         K,pc,D,beta = params
-        uvec = [u1,u2,bu]; xvec = [0,0,0]; yvec = [0,0,0]; rvec = [r1,r2]
+        uvec = [u1,u2,bu]; 
+        xvec = [0,0,0]; 
+        yvec = [0,0,0]; 
+        rvec = [r1,r2]
         uvec, xvec, yvec, rvec,W = NextGen(uvec,xvec,yvec,rvec, D, K,pc,beta = beta)
         return_vec = np.array(freqs) - np.array([*uvec,*rvec,W])
         # return_vec of [Wu1 - Wu1func, ... r1 - r1fun, r2 - r2fun]
@@ -192,6 +195,190 @@ def get_gradients(df):
 
 
 
+
+def get_UniqueEquilibria(df,if_save=False):
+    
+    df_eq = df.round(6)[(df.reached_eq==1)].groupby(['K','pc','s','mu','D','beta','u1eq','u2eq','bueq',
+                                                     'r1eq','r2eq','Weq','URstable'], as_index = False)
+    df_eq = df_eq['u2init'].count()
+    df_eq.rename(columns={'u2init':'NumInitials'}, inplace=True)
+    # df_eq.reset_index(inplace=True, drop=True)
+    df_eq = df_eq.apply(lambda row: JstarStable(row), axis = 1)
+    df_eq = get_gradients(df_eq)
+    if if_save:
+        df_eq.to_csv('UniqueEquilibria.csv', index = False)
+    return(df_eq)
+def get_gradients(df):
+    df_use = df.copy()
+    u1vec = df_use.u1eq
+    u2vec = df_use.u2eq
+    r1vec = df_use.r1eq
+    r2vec = df_use.r2eq
+    Wvec = df_use.Weq
+    Kvec = df_use.K
+    Dvec = df_use.D
+    svec = df_use.s
+    muvec = df_use.mu
+    Csvec = [Grad_s([u1,u2], [r1,r2], W, D, s, mu) for u1,
+             u2,r1,r2,W,D,s,mu in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Dvec,svec,muvec)]
+    CDvec = [Grad_D([u1,u2], [r1,r2], W, K,D) for u1,u2,r1,r2,W,K,D in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Kvec,Dvec)]
+    df_use['C_s'] = Csvec
+    df_use['C_D'] = CDvec
+    return(df_use)
+
+def df_ext_stability_iterate(df):
+    # Check stability to alleles a (with delta_s > 0 and delta_s < 0) and alleles b (with delta_D > 0 and delta_D < 0)
+    
+    x_pos_invades = df.apply(lambda row:Check_ext_stability_iterate(row_eq, 0.01, 0)) # ds > 0
+    x_neg_invades = df.apply(lambda row:Check_ext_stability_iterate(row_eq, -0.01, 0)) # ds < 0
+    y_pos_invades = df.apply(lambda row:Check_ext_stability_iterate(row_eq, 0, 0.01)) # dD > 0
+    x_neg_invades = df.apply(lambda row:Check_ext_stability_iterate(row_eq, 0, -0.01)) # dD < 0
+    df['x_pos_invades'] = x_pos_invades
+    df['x_neg_invades'] = x_neg_invades
+    df['y_neg_invades'] = y_neg_invades
+    df['y_pos_invades'] = y_pos_invades
+    
+def Check_ext_stability_iterate(row_eq, ds, dD):
+    # for a row of df, perturb and iterate 1000 steps
+    # ds, dD tells us if we're perturbing in the x or y direction. z is a stand-in for x or y
+    # if z(final) - z(initial) > dz or then unstable
+    # return 1 if unstable, 0 otherwise
+    
+    # get parameters
+    s, D, mu, beta, K, pc = np.transpose(*row_eq[['s','D','mu','beta','K','pc']].values)
+    
+    # edge cases 
+    
+    if s == 0 and ds < 0:
+        return(False)
+    if D == -2 and dD < 0:
+        return( False)
+    if D == 1 and dD > 0:
+        return( False)
+    
+    # vectors of values
+    [u1,u2,bu],[z1,z2,bz],[r1,r2] = Perturb(row_eq) 
+    # decide if z is x or y
+    xvec = [z1, z2, bz] if ds != 0 else [0,0,0]
+    yvec = [z1, z2, bz] if dD != 0 else [0,0,0]
+    
+    # calculate dk and d_(pi_C)
+    norm = scs.norm(mu,1)
+    dk = Kfun(s + ds, norm) - K
+    dpc = pcfun(s + ds, norm) - pc
+    
+    n = len(u1)
+    perturbation_df = pd.DataFrame({'u1':u1, 'u2':u2, 'bu': bu,
+                                   'x1':xvec[0], 'x2':xvec[1], 'bx':xvec[2],
+                                   'y1':yvec[0], 'y2':yvec[1], 'by':yvec[2],
+                                   'r1': r1, 'r2': r2,
+                                   'u_1000': np.zeros(n), 'x_1000': np.zeros(n), 'y_1000':np.zeros(n)})
+    
+    def iterate_1000(row, K, pc, D, beta, dk, dpc, dD):
+        [u1, u2, bu, x1, x2, bx, y1, y2, by, r1, r2] = np.transpose(row[['u1','u2','bu','x1',
+                                                                        'x2','bx','y1','y2','by','r1','r2']].values)
+        uvec = [u1,u2,bu]
+        xvec = [x1,x2,bx]
+        yvec = [y1,y2,by]
+        rvec = [r1,r2]
+        for t in range(0,1000):
+            uvec,xvec,yvec,rvec,W = NextGen(uvec,xvec,yvec,rvec,D,K,pc,beta, [dD, dk, dpc])
+        row.u_1000 = sum(uvec)
+        row.x_1000 = sum(xvec)
+        row.y_1000 = sum(yvec)
+        return(row)
+        
+        
+    perturbation_df = perturbation_df.apply(lambda row: iterate_1000(row, K, pc, D, beta, dk, dpc, dD), axis = 1)
+    z_1000 = perturbation_df.x_1000 if ds != 0 else perturbation_df.y_1000
+    if_invades = sum(z_1000 > 0.01) > 0
+    return(if_invades)
+
+    
+
+    
+def Perturb(row):
+    # After the [u1,u2,bu,r1,r2] eq is perturbed with the addition of the a or b allele, get new frequencies
+    # z is a stand-in for x or y
+    # perturb by a magnitude of 0.01... so |dr1| = |dr2| = |du| = 0.01, and either |dx| or |dy| = 0.01
+    u1eq, u2eq, bueq, r1eq, r2eq = np.transpose(*row[['u1eq','u2eq','bueq', 'r1eq','r2eq']].values)
+    
+    uvec = [u1eq, u2eq, bueq]
+    rvec = [r1eq, r2eq]
+    # get new post-perturb vectors
+    
+    # no need to check if valid
+    dz = 0.01
+    dz1vec = np.array([0.05, 0.3,0.48, 0.08])*dz
+    dz2vec = np.array([0.1,0.6,0.5,0.9])*dz
+    dbzvec = dz - dz1vec - dz2vec
+    which_z = [0,1,2,3]
+    
+    #dr... prune r + dr values that are invalid
+    
+    dr1=0 #the default is not changing r1
+    if rvec[0]>0:
+        dr1 = np.array([-0.01,0.01])
+        check_r1 = (rvec[0] + dr1 > 0)&(rvec[0] + dr1 < 1)
+        dr1 = dr1[check_r1]
+    dr2 = 0
+    if rvec[1]>0:
+        dr2 = np.array([-0.01,0.01])
+        check_r2 = (rvec[1] + dr2 > 0) & (rvec[1] + dr2 < 1)
+        dr2 = dr2[check_r2]
+    
+    # du perturbations... look similar to x perturbs, but opposite direction
+    du = -dz
+    du1vec = np.array([0.015, 0.29,0.49, 0.07])*du
+    du2vec = np.array([0.11,0.49,0.51,0.89])*du
+    dbuvec = du - du1vec - du2vec
+    which_u = [0,1,2,3]
+    for i in which_u:
+        duvec = [du1vec[i],du2vec[i],dbuvec[i]]
+        [du1vec[i],du2vec[i],dbuvec[i]] = Perturb_EdgeCase(uvec,duvec)
+    
+    # now find all the combinations
+    which_z_mesh, which_u_mesh, DR1, DR2 = np.meshgrid(which_z, which_u, dr1, dr2)
+    [which_z, which_u, dr1, dr2] = [np.ndarray.flatten(item) for 
+                                    item in [which_z_mesh, which_u_mesh, DR1, DR2]]
+    z1 = dz1vec[which_z]; z2 = dz2vec[which_z]; bz = dbzvec[which_z]
+    u1 = uvec[0] + du1vec[which_u]
+    u2 = uvec[1] + du2vec[which_u]
+    bu = uvec[2] + dbuvec[which_u]
+    r1 = rvec[0] + dr1
+    r2 = rvec[1] + dr2
+    
+    
+    return([u1,u2,bu],[z1,z2,bz],[r1,r2])
+
+def Perturb_EdgeCase(uvec,duvec):
+    #recursively checks for edge cases so i don't get an invalid frequency. Adjusts duvec if needed
+    
+    # make sure using numpy arrays
+    du = sum(duvec)
+    uvec = np.array(uvec); duvec = np.array(duvec);
+    # find locations of edge cases
+    edge_bool = uvec + duvec <= 0
+    
+    n = sum(edge_bool)
+    if n>0:
+        duvec[edge_bool] = -uvec[edge_bool] +0.00001 # so not at exactly 0
+        du_remain = du - sum(duvec)
+        duvec[~edge_bool] = duvec[~edge_bool] + (1/np.float64(3-n))*du_remain
+        
+        # make sure that we didn't cause a different frequency to be negative:
+        return(Perturb_EdgeCase(uvec,duvec))
+
+    else:
+        return(duvec)
+
+
+
+
+'''
+Functions we no longer use
+
+'''
 def reflect_df_Xsteps(df):
     u1init = df.u1init
     u2init = df.u2init
@@ -317,36 +504,6 @@ def retry_findeq(df):
         
 #     df[mask] = df4
     return(df)
-
-def get_UniqueEquilibria(df,if_save=False):
-    
-    df_eq = df.round(6)[(df.reached_eq==1)].groupby(['K','pc','s','mu','D','beta','u1eq','u2eq','bueq',
-                                                     'r1eq','r2eq','Weq','URstable'], as_index = False)
-    df_eq = df_eq['u2init'].count()
-    df_eq.rename(columns={'u2init':'NumInitials'}, inplace=True)
-    # df_eq.reset_index(inplace=True, drop=True)
-    df_eq = df_eq.apply(lambda row: JstarStable(row), axis = 1)
-    df_eq = get_gradients(df_eq)
-    if if_save:
-        df_eq.to_csv('UniqueEquilibria.csv', index = False)
-    return(df_eq)
-def get_gradients(df):
-    df_use = df.copy()
-    u1vec = df_use.u1eq
-    u2vec = df_use.u2eq
-    r1vec = df_use.r1eq
-    r2vec = df_use.r2eq
-    Wvec = df_use.Weq
-    Kvec = df_use.K
-    Dvec = df_use.D
-    svec = df_use.s
-    muvec = df_use.mu
-    Csvec = [Grad_s([u1,u2], [r1,r2], W, D, s, mu) for u1,
-             u2,r1,r2,W,D,s,mu in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Dvec,svec,muvec)]
-    CDvec = [Grad_D([u1,u2], [r1,r2], W, K,D) for u1,u2,r1,r2,W,K,D in zip(u1vec,u2vec,r1vec,r2vec,Wvec,Kvec,Dvec)]
-    df_use['C_s'] = Csvec
-    df_use['C_D'] = CDvec
-    return(df_use)
 
 def get_lambdas(row, dmat, mumu, dk_pos, dk_neg, dpc_pos, dpc_neg):
     s = row.s
