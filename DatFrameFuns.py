@@ -229,14 +229,15 @@ def get_gradients(df):
 def df_ext_stability_iterate(df):
     # Check stability to alleles a (with delta_s > 0 and delta_s < 0) and alleles b (with delta_D > 0 and delta_D < 0)
     
-    x_pos_invades = df.apply(lambda row:Check_ext_stability_iterate(row_eq, 0.01, 0)) # ds > 0
-    x_neg_invades = df.apply(lambda row:Check_ext_stability_iterate(row_eq, -0.01, 0)) # ds < 0
-    y_pos_invades = df.apply(lambda row:Check_ext_stability_iterate(row_eq, 0, 0.01)) # dD > 0
-    x_neg_invades = df.apply(lambda row:Check_ext_stability_iterate(row_eq, 0, -0.01)) # dD < 0
+    x_pos_invades = df.apply(lambda row_eq:Check_ext_stability_iterate(row_eq, 0.01, 0), axis = 1) # ds > 0
+    x_neg_invades = df.apply(lambda row_eq:Check_ext_stability_iterate(row_eq, -0.01, 0), axis = 1) # ds < 0
+    y_pos_invades = df.apply(lambda row_eq:Check_ext_stability_iterate(row_eq, 0, 0.01), axis = 1) # dD > 0
+    y_neg_invades = df.apply(lambda row_eq:Check_ext_stability_iterate(row_eq, 0, -0.01), axis = 1) # dD < 0
     df['x_pos_invades'] = x_pos_invades
     df['x_neg_invades'] = x_neg_invades
     df['y_neg_invades'] = y_neg_invades
     df['y_pos_invades'] = y_pos_invades
+    return(df)
     
 def Check_ext_stability_iterate(row_eq, ds, dD):
     # for a row of df, perturb and iterate 1000 steps
@@ -245,7 +246,7 @@ def Check_ext_stability_iterate(row_eq, ds, dD):
     # return 1 if unstable, 0 otherwise
     
     # get parameters
-    s, D, mu, beta, K, pc = np.transpose(*row_eq[['s','D','mu','beta','K','pc']].values)
+    s, D, mu, beta, K, pc = np.transpose(row_eq[['s','D','mu','beta','K','pc']].values)
     
     # edge cases 
     
@@ -272,26 +273,29 @@ def Check_ext_stability_iterate(row_eq, ds, dD):
                                    'x1':xvec[0], 'x2':xvec[1], 'bx':xvec[2],
                                    'y1':yvec[0], 'y2':yvec[1], 'by':yvec[2],
                                    'r1': r1, 'r2': r2,
-                                   'u_1000': np.zeros(n), 'x_1000': np.zeros(n), 'y_1000':np.zeros(n)})
+                                   'u_t': np.zeros(n), 'x_t': np.zeros(n), 'y_t':np.zeros(n)})
     
-    def iterate_1000(row, K, pc, D, beta, dk, dpc, dD):
+    def iterate_t(row, K, pc, D, beta, dk, dpc, dD, tsteps = 10000):
         [u1, u2, bu, x1, x2, bx, y1, y2, by, r1, r2] = np.transpose(row[['u1','u2','bu','x1',
                                                                         'x2','bx','y1','y2','by','r1','r2']].values)
         uvec = [u1,u2,bu]
         xvec = [x1,x2,bx]
         yvec = [y1,y2,by]
         rvec = [r1,r2]
-        for t in range(0,1000):
+        for t in range(0,tsteps):
+            uvec_old = uvec; xvec_old = xvec; yvec_old = yvec; rvec_old = rvec
             uvec,xvec,yvec,rvec,W = NextGen(uvec,xvec,yvec,rvec,D,K,pc,beta, [dD, dk, dpc])
-        row.u_1000 = sum(uvec)
-        row.x_1000 = sum(xvec)
-        row.y_1000 = sum(yvec)
+            if np.allclose([*uvec,*xvec,*yvec,*rvec],[*uvec_old, *xvec_old, *yvec_old, *rvec_old], rtol = 1e-10, atol = 1e-10):
+                break
+        row.u_t = sum(uvec)
+        row.x_t = sum(xvec)
+        row.y_t = sum(yvec)
         return(row)
         
         
-    perturbation_df = perturbation_df.apply(lambda row: iterate_1000(row, K, pc, D, beta, dk, dpc, dD), axis = 1)
-    z_1000 = perturbation_df.x_1000 if ds != 0 else perturbation_df.y_1000
-    if_invades = sum(z_1000 > 0.01) > 0
+    perturbation_df = perturbation_df.apply(lambda row: iterate_t(row, K, pc, D, beta, dk, dpc, dD), axis = 1)
+    z_t = perturbation_df.x_t if ds != 0 else perturbation_df.y_t
+    if_invades = sum(z_t > 0.01) > 0 # checking if at least one perturbation goes away from the equilibrium
     return(if_invades)
 
     
@@ -301,55 +305,54 @@ def Perturb(row):
     # After the [u1,u2,bu,r1,r2] eq is perturbed with the addition of the a or b allele, get new frequencies
     # z is a stand-in for x or y
     # perturb by a magnitude of 0.01... so |dr1| = |dr2| = |du| = 0.01, and either |dx| or |dy| = 0.01
-    u1eq, u2eq, bueq, r1eq, r2eq = np.transpose(*row[['u1eq','u2eq','bueq', 'r1eq','r2eq']].values)
+    u1eq, u2eq, bueq, r1eq, r2eq = np.transpose(row[['u1eq','u2eq','bueq', 'r1eq','r2eq']].values)
     
     uvec = [u1eq, u2eq, bueq]
     rvec = [r1eq, r2eq]
-    # get new post-perturb vectors
-    
-    # no need to check if valid
+    #overall change magnitude
     dz = 0.01
-    dz1vec = np.array([0.05, 0.3,0.48, 0.08])*dz
-    dz2vec = np.array([0.1,0.6,0.5,0.9])*dz
-    dbzvec = dz - dz1vec - dz2vec
-    which_z = [0,1,2,3]
     
-    #dr... prune r + dr values that are invalid
-    
-    dr1=0 #the default is not changing r1
-    if rvec[0]>0:
-        dr1 = np.array([-0.01,0.01])
-        check_r1 = (rvec[0] + dr1 > 0)&(rvec[0] + dr1 < 1)
-        dr1 = dr1[check_r1]
-    dr2 = 0
-    if rvec[1]>0:
-        dr2 = np.array([-0.01,0.01])
-        check_r2 = (rvec[1] + dr2 > 0) & (rvec[1] + dr2 < 1)
-        dr2 = dr2[check_r2]
-    
-    # du perturbations... look similar to x perturbs, but opposite direction
+    # change u
     du = -dz
-    du1vec = np.array([0.015, 0.29,0.49, 0.07])*du
-    du2vec = np.array([0.11,0.49,0.51,0.89])*du
+    du1vec = -du*np.array([0.015, 0.29, 0.49, 0.9])
+    du2vec = -du* np.array([0.11, 0.49, 0.51, 0.05])
     dbuvec = du - du1vec - du2vec
-    which_u = [0,1,2,3]
-    for i in which_u:
+    # get new post-perturb vectors
+    for i in range(0,len(du1vec)):
         duvec = [du1vec[i],du2vec[i],dbuvec[i]]
         [du1vec[i],du2vec[i],dbuvec[i]] = Perturb_EdgeCase(uvec,duvec)
     
-    # now find all the combinations
-    which_z_mesh, which_u_mesh, DR1, DR2 = np.meshgrid(which_z, which_u, dr1, dr2)
-    [which_z, which_u, dr1, dr2] = [np.ndarray.flatten(item) for 
-                                    item in [which_z_mesh, which_u_mesh, DR1, DR2]]
-    z1 = dz1vec[which_z]; z2 = dz2vec[which_z]; bz = dbzvec[which_z]
-    u1 = uvec[0] + du1vec[which_u]
-    u2 = uvec[1] + du2vec[which_u]
-    bu = uvec[2] + dbuvec[which_u]
-    r1 = rvec[0] + dr1
-    r2 = rvec[1] + dr2
+    # change r
+    
+    dr = 0.01
+    dr1vec = dr*np.array([1,0.5,-1,0.2])
+    check_r1_0 = rvec[0] + dr1vec < 0 
+    check_r1_1 = rvec[0] + dr1vec> 1
+    check_r1 = check_r1_0 + check_r1_1
+    dr1vec[check_r1] = - dr1vec[check_r1]
+    
+    dr2vec = dr*np.array([0.9,-0.3,0.5,-0.8])
+    check_r2_0 = rvec[1] + dr2vec < 0 
+    check_r2_1 = rvec[1] + dr2vec> 1
+    check_r2 = check_r2_0 + check_r2_1
+    dr2vec[check_r2] = - dr2vec[check_r2]
     
     
-    return([u1,u2,bu],[z1,z2,bz],[r1,r2])
+    # no need to check if valid
+    
+    
+    dz1vec = np.array([0.05, 0.48, 0.9, 0.3])*dz
+    dz2vec = np.array([0.1, 0.5, 0.04, 0.6])*dz
+    dbzvec = dz - dz1vec - dz2vec
+
+    u1 = uvec[0] + du1vec
+    u2 = uvec[1] + du2vec
+    bu = uvec[2] + dbuvec
+    r1 = rvec[0] + dr1vec
+    r2 = rvec[1] + dr2vec
+    
+    
+    return([u1,u2,bu],[dz1vec,dz2vec,dbzvec],[r1,r2])
 
 def Perturb_EdgeCase(uvec,duvec):
     #recursively checks for edge cases so i don't get an invalid frequency. Adjusts duvec if needed

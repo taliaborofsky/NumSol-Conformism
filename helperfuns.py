@@ -139,7 +139,8 @@ def Grad_s(uvec, rvec, W, D, s, mu):
     fs = norm.pdf(s)
     fminuss = norm.pdf(-s)
     # find numerator
-    C_s = (1/W)*(-fs + (fs+fminuss)*(r1*u1+r1*D*phi_fun(u1) + r2*u2 + r2*D*phi_fun(u2)))
+    
+    C_s = (1/W)*(-fs + (fs + fminuss)*(r1*(u1 + D* phi_fun(u1)) + r2*(u2+D*phi_fun(u2))) - (r1 + r2)*fs)
     return(C_s)
 
 # Finds C_D for external stability analysis
