@@ -246,7 +246,7 @@ def Check_ext_stability_iterate(row_eq, ds, dD):
     # return 1 if unstable, 0 otherwise
     
     # get parameters
-    s, D, mu, beta, K, pc = np.transpose(row_eq[['s','D','mu','beta','K','pc']].values)
+    s, D, mu, beta, K, pc = row_eq[['s','D','mu','beta','K','pc']].values.flatten().tolist()
     
     # edge cases 
     
@@ -258,54 +258,29 @@ def Check_ext_stability_iterate(row_eq, ds, dD):
         return( False)
     
     # vectors of values
-    [u1,u2,bu],[z1,z2,bz],[r1,r2] = Perturb(row_eq) 
+    dz = 0.01
+    uvec,zvec,rvec = Perturb(row_eq) 
     # decide if z is x or y
-    xvec = [z1, z2, bz] if ds != 0 else [0,0,0]
-    yvec = [z1, z2, bz] if dD != 0 else [0,0,0]
+    xvec = zvec if ds != 0 else np.array([0,0,0])
+    yvec = zvec if dD != 0 else np.array([0,0,0])
     
     # calculate dk and d_(pi_C)
     norm = scs.norm(mu,1)
     dk = Kfun(s + ds, norm) - K
     dpc = pcfun(s + ds, norm) - pc
     
-    n = len(u1)
-    perturbation_df = pd.DataFrame({'u1':u1, 'u2':u2, 'bu': bu,
-                                   'x1':xvec[0], 'x2':xvec[1], 'bx':xvec[2],
-                                   'y1':yvec[0], 'y2':yvec[1], 'by':yvec[2],
-                                   'r1': r1, 'r2': r2,
-                                   'u_t': np.zeros(n), 'x_t': np.zeros(n), 'y_t':np.zeros(n)})
-    
-    def iterate_t(row, K, pc, D, beta, dk, dpc, dD, tsteps = 10000):
-        [u1, u2, bu, x1, x2, bx, y1, y2, by, r1, r2] = np.transpose(row[['u1','u2','bu','x1',
-                                                                        'x2','bx','y1','y2','by','r1','r2']].values)
-        uvec = [u1,u2,bu]
-        xvec = [x1,x2,bx]
-        yvec = [y1,y2,by]
-        rvec = [r1,r2]
-        for t in range(0,tsteps):
-            uvec_old = uvec; xvec_old = xvec; yvec_old = yvec; rvec_old = rvec
-            uvec,xvec,yvec,rvec,W = NextGen(uvec,xvec,yvec,rvec,D,K,pc,beta, [dD, dk, dpc])
-            if np.allclose([*uvec,*xvec,*yvec,*rvec],[*uvec_old, *xvec_old, *yvec_old, *rvec_old], rtol = 1e-10, atol = 1e-10):
-                break
-        row.u_t = sum(uvec)
-        row.x_t = sum(xvec)
-        row.y_t = sum(yvec)
-        return(row)
-        
-        
-    perturbation_df = perturbation_df.apply(lambda row: iterate_t(row, K, pc, D, beta, dk, dpc, dD), axis = 1)
-    z_t = perturbation_df.x_t if ds != 0 else perturbation_df.y_t
-    if_invades = sum(z_t > 0.01) > 0 # checking if at least one perturbation goes away from the equilibrium
-    return(if_invades)
-
-    
-
+    tsteps = 10000
+    for i in range(0, tsteps):
+        result = NextGen(uvec,xvec,yvec,rvec, D, K,pc ,beta, deltas = [dD, dk, dpc])
+        uvec, xvec, yvec, rvec, W = result
+    z = sum(xvec) if ds != 0 else sum(yvec)
+    return(sum(z>dz)>0)
     
 def Perturb(row):
     # After the [u1,u2,bu,r1,r2] eq is perturbed with the addition of the a or b allele, get new frequencies
     # z is a stand-in for x or y
     # perturb by a magnitude of 0.01... so |dr1| = |dr2| = |du| = 0.01, and either |dx| or |dy| = 0.01
-    u1eq, u2eq, bueq, r1eq, r2eq = np.transpose(row[['u1eq','u2eq','bueq', 'r1eq','r2eq']].values)
+    u1eq, u2eq, bueq, r1eq, r2eq = row[['u1eq','u2eq','bueq', 'r1eq','r2eq']].values.flatten().tolist()
     
     uvec = [u1eq, u2eq, bueq]
     rvec = [r1eq, r2eq]
